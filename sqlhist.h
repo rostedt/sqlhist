@@ -20,4 +20,6 @@ void *add_field(const char *field, const char *label);
 
 void add_expr(const char *name, void *expr);
 
+void add_selection(void *item);
+
 #endif

@@ -51,6 +51,11 @@ struct match_map {
 	const char		*B;
 };
 
+struct selection {
+	struct selection	*next;
+	char			*item;
+};
+
 enum expr_type {
 	EXPR_FIELD,
 	EXPR_PLUS,
@@ -90,6 +95,8 @@ struct sql_table {
 	struct match_map	*matches;
 	struct table_map	*tables;
 	struct expr_map		*exprs;
+	struct selection	*selections;
+	struct selection	**next_selection;
 };
 
 static struct sql_table *curr_table;
@@ -101,6 +108,8 @@ void table_start(void)
 	table = calloc(1, sizeof(*table));
 	if (!table)
 		die("malloc");
+
+	table->next_selection = &table->selections;
 
 	table->parent = curr_table;
 	if (curr_table) {
@@ -203,6 +212,36 @@ static char *find_expr_label(struct expression *e)
 	}
 
 	return NULL;
+}
+
+void add_selection(void *item)
+{
+	struct selection *selection;
+	struct expression *e = item;
+	static int once;
+	static int arg_cnt;
+	char *name;
+
+	if (!curr_table) {
+		if (!once++)
+			printf("No table?\n");
+		return;
+	}
+
+	selection = malloc(sizeof(*selection));
+	if (!selection)
+		die("malloc");
+
+	name = find_expr_label(e);
+	if (!name) {
+		name = store_printf("__arg%d__", arg_cnt++);
+		add_expr(name, e);
+	}
+
+	selection->item = name;
+	selection->next = NULL;
+	*curr_table->next_selection = selection;
+	curr_table->next_selection = &selection->next;
 }
 
 static char *expr_op_connect(void *A, void *B, char *op)
@@ -535,9 +574,16 @@ static void dump_table(struct sql_table *table)
 
 static void make_synthetic_events(struct sql_table *table)
 {
+	struct selection *selection;
+
 	if (!table)
 		return;
-	
+
+	printf("%s", table->name);
+	for (selection = table->selections; selection; selection = selection->next)
+		printf(" (type) %s", selection->item);
+	printf(" > synthetic_events\n");
+
 	make_synthetic_events(table->children);
 	make_synthetic_events(table->sibling);
 }

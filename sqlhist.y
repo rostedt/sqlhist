@@ -66,7 +66,7 @@ selection_list :
 				}
  ;
 
-selection_item : selection_expr { $$ = show_expr($1); }
+selection_item : selection_expr { $$ = show_expr($1); add_selection($1); }
   ;
 
 selection_expr : 
