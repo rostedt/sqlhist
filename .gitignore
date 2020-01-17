@@ -1,0 +1,5 @@
+lex.yy.c
+*~
+sqlhist.output
+sqlhist.tab.[ch]
+sqlhist

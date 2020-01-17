@@ -1,0 +1,4 @@
+select start.common_timestamp as start_time,
+                     end.common_timestamp as end_time, start.pid,
+                    (start_time - end_time) as delta
+             from sched_waking as start
