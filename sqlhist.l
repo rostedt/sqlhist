@@ -22,13 +22,15 @@ static int line_no = 1;
 
 select { return SELECT; }
 as { return AS; }
-from { return FROM ;}
+from { return FROM; }
+join { return JOIN; }
+on { return ON; }
 
 \$[a-z][a-z0-9_]* { yylval.string = store_str(yytext); return VARIABLE; }
 
 [a-z0-9_\.]+ {  yylval.string = store_str(yytext); return STRING; }
 
-[()\-\+\*/,] { return yytext[0]; }
+[()\-\+\*/,=] { return yytext[0]; }
 
 [ \t]
 \n { line_no++; }

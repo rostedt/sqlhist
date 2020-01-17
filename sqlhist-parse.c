@@ -45,20 +45,126 @@ struct label_map {
 	const char		*value;
 };
 
-static struct label_map *label_maps;
+struct match_map {
+	struct match_map	*next;
+	const char		*A;
+	const char		*B;
+};
+
+struct sql_table;
+
+struct table_map {
+	struct table_map	*next;
+	struct sql_table	*table;
+	char			*name;
+};
+
+struct sql_table {
+	char			*name;
+	struct sql_table	*parent;
+	struct sql_table	*children;
+	struct sql_table	*sibling;
+	struct label_map	*labels;
+	struct match_map	*matches;
+	struct table_map	*tables;
+};
+
+static struct sql_table *curr_table;
+
+void table_start(void)
+{
+	struct sql_table *table;;
+
+	table = calloc(1, sizeof(*table));
+	if (!table)
+		die("malloc");
+
+	table->parent = curr_table;
+	if (curr_table) {
+		if (curr_table->children)
+			table->sibling = curr_table->children;
+		curr_table->children = table;
+	}
+
+	curr_table = table;
+}
+
+void table_end(const char *name)
+{
+	if (name)
+		curr_table->name = store_str(name);
+	else
+		curr_table->name = store_str("Annonymous");
+
+	if (curr_table->parent)
+		curr_table = curr_table->parent;
+}
+
+void add_table(const char *label)
+{
+	struct table_map *tmap;
+	static int once;
+
+	if (!curr_table) {
+		if (!once++)
+			printf("No table?\n");
+		return;
+	}
+
+	if (!curr_table->parent)
+		return;
+
+	tmap = malloc(sizeof(*tmap));
+	if (!tmap)
+		die("malloc");
+
+	tmap->table = curr_table;
+	tmap->name = store_str(label);
+
+	tmap->next = curr_table->parent->tables;
+	curr_table->parent->tables = tmap;
+}
 
 void add_label(const char *label, const char *val)
 {
 	struct label_map *lmap;
+	static int once;
+
+	if (!curr_table) {
+		if (!once++)
+			printf("No table?\n");
+		return;
+	}
 
 	lmap = malloc(sizeof(*lmap));
 	if (!lmap)
 		die("malloc");
-	lmap->label = strdup(label);
-	lmap->value = strdup(val);
+	lmap->label = store_str(label);
+	lmap->value = store_str(val);
 
-	lmap->next = label_maps;
-	label_maps = lmap;
+	lmap->next = curr_table->labels;
+	curr_table->labels = lmap;
+}
+
+void add_match(const char *A, const char *B)
+{
+	struct match_map *map;
+	static int once;
+
+	if (!curr_table) {
+		if (!once++)
+			printf("No table?\n");
+		return;
+	}
+
+	map = malloc(sizeof(*map));
+	if (!map)
+		die("malloc");
+	map->A = store_str(A);
+	map->B = store_str(B);
+
+	map->next = curr_table->matches;
+	curr_table->matches = map;
 }
 
 static inline unsigned int quick_hash(const char *str)
@@ -93,6 +199,10 @@ static struct str_hash *find_string(const char *str)
 	return NULL;
 }
 
+/*
+ * If @str is found, then return the hash string.
+ * This lets store_str() know to free str.
+ */
 static char **add_hash(const char *str)
 {
 	struct str_hash *hash;
@@ -205,15 +315,48 @@ static int lex_it(void)
 	return ret;
 }
 
-void dump_label_map(void)
+static void dump_label_map(struct sql_table *table)
 {
 	struct label_map *lmap;
+	struct table_map *tmap;
 
-	if (label_maps)
-		printf("Labels:\n");
-	for (lmap = label_maps; lmap; lmap = lmap->next) {
+	if (table->labels)
+		printf("%s Labels:\n", table->name);
+	for (lmap = table->labels; lmap; lmap = lmap->next) {
 		printf("  %s = %s\n", lmap->label, lmap->value);
 	}
+	for (tmap = table->tables; tmap; tmap = tmap->next) {
+		printf("  %s = Table %s\n", tmap->name, tmap->table->name);
+	}
+}
+
+static void dump_match_map(struct sql_table *table)
+{
+	struct match_map *map;
+
+	if (table->matches)
+		printf("%s Matches:\n", table->name);
+	for (map = table->matches; map; map = map->next) {
+		printf("  %s = %s\n", map->A, map->B);
+	}
+}
+
+static void dump_table(struct sql_table *table)
+{
+	if (!table)
+		return;
+
+	printf("\nTable: %s\n", table->name);
+	dump_label_map(table);
+	dump_match_map(table);
+
+	dump_table(table->children);
+	dump_table(table->sibling);
+}
+
+static void dump_tables(void)
+{
+	dump_table(curr_table);
 }
 
 static void parse_it(void)
@@ -225,7 +368,7 @@ static void parse_it(void)
 	ret = yyparse();
 	printf("ret = %d\n", ret);
 
-	dump_label_map();
+	dump_tables();
 }
 
 static char *buffer;
