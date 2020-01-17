@@ -15,6 +15,7 @@ extern void yyerror(char *fmt, ...);
 %union {
 	int	s32;
 	char	*string;
+	void	*expr;
 }
 
 %token AS SELECT FROM JOIN ON WHERE
@@ -23,10 +24,12 @@ extern void yyerror(char *fmt, ...);
 %left '+' '-'
 %left '*' '/'
 
-%type <string> name item selection_expr field label named_field
+%type <string> name field label
 %type <string> selection_list table_exp selection_item
 %type <string> from_clause select_statement event_map
 %type <string> join_clause where_clause
+
+%type <expr>  selection_expr item named_field
 
 %%
 
@@ -48,39 +51,54 @@ select : SELECT  { table_start(); printf("starting SELECT\n"); }
   ;
 
 select_statement :
-    select selection_list table_exp { printf("SELECT %s %s\n", $2, $3); }
+    select selection_list table_exp
+				{
+					$$ = store_printf("SELECT %s %s", $2, $3);
+					printf("%s\n", $$);
+				}
   ;
 
 selection_list :
    selection_item
  | selection_list ',' selection_item
-   				{ $$ = store_printf("%s, %s", $1, $3); }
+   				{
+					$$ = store_printf("%s, %s", $1, $3);
+				}
  ;
 
-selection_item : selection_expr
+selection_item : selection_expr { $$ = show_expr($1); }
   ;
 
 selection_expr : 
    selection_expr '+' selection_expr
-   				{ $$ = store_printf("%s + %s", $1, $3); }
+   				{
+					$$ = add_plus($1, $3);
+				}
  | selection_expr '-' selection_expr
-   				{ $$ = store_printf("%s - %s", $1, $3); }
+   				{
+					$$ = add_minus($1, $3);
+				}
  | selection_expr '*' selection_expr
-   				{ $$ = store_printf("%s * %s", $1, $3); }
+   				{
+					$$ = add_mult($1, $3);
+				}
  | selection_expr '/' selection_expr
-   				{ $$ = store_printf("%s / %s", $1, $3); }
+   				{
+					$$ = add_divid($1, $3);
+				}
  | item
- | '(' selection_expr ')' { $$ = store_printf("(%s)", $2); }
+ | '(' selection_expr ')' { $$ = $2; }
  | '(' selection_expr ')' label
 			{
-				add_label($4, "EXPRE");
-				$$ = store_str($4);
+				add_expr($4, $2);
+				printf("add expr %s\n", show_expr($2));
+				$$ = $2;
 			}
  ;
 
 item :
    named_field 
- | field
+ | field		{ $$ = add_field($1, NULL); }
  ;
 
 field :
@@ -89,7 +107,7 @@ field :
  ;
 
 named_field :
-   field label { $$ = store_str($2); add_label($2, $1); }
+   field label { $$ = add_field($1, $2); }
  ;
 
 name :
@@ -101,7 +119,7 @@ event_map :
  ;
 
 where_clause :
-   WHERE item { $$ = store_printf(" WHERE %s", $2); }
+   WHERE item { $$ = store_printf(" WHERE %s", show_expr($2)); }
  ;
 
 table_exp :
@@ -110,19 +128,19 @@ table_exp :
  ;
 
 from_clause :
-   FROM item			{ $$ = store_printf("FROM %s", $2); }
+   FROM item			{ $$ = store_printf("FROM %s", show_expr($2)); }
 
  | FROM '(' select_statement ')' label
 				{
 					add_table($5); table_end($5);
-					$$ = store_printf("($s) %s", $3, $5);
+					$$ = store_printf("FROM (%s) AS %s", $3, $5);
 				}
  | FROM '(' select_statement ')'
-				{ table_end(NULL); $$ = store_printf("($s)", $3); }
+				{ table_end(NULL); $$ = store_printf("FROM ($s)", $3); }
  ;
 
 join_clause :
-  JOIN item	{ $$ = store_str($2); }
+  JOIN item	{ $$ = store_str(show_expr($2)); }
  ;
 
 on_clause :
@@ -130,7 +148,7 @@ on_clause :
  ;
 
 match :
-   item '=' item { add_match($1, $3); }
+   item '=' item { add_match(show_expr($1), show_expr($3)); }
  ;
 
 match_clause :

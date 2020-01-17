@@ -51,12 +51,34 @@ struct match_map {
 	const char		*B;
 };
 
+enum expr_type {
+	EXPR_FIELD,
+	EXPR_PLUS,
+	EXPR_MINUS,
+	EXPR_MULT,
+	EXPR_DIVID,
+};
+
 struct sql_table;
+
+struct expression {
+	enum expr_type		type;
+	void			*A;
+	void			*B;
+	struct sql_table	*table;
+};
+
+struct expr_map {
+	struct expr_map		*next;
+	struct expression	*e;
+	char			*label;
+};
 
 struct table_map {
 	struct table_map	*next;
-	struct sql_table	*table;
 	char			*name;
+	struct sql_table	*table;
+	struct expression	*expressions;
 };
 
 struct sql_table {
@@ -67,6 +89,7 @@ struct sql_table {
 	struct label_map	*labels;
 	struct match_map	*matches;
 	struct table_map	*tables;
+	struct expr_map		*exprs;
 };
 
 static struct sql_table *curr_table;
@@ -165,6 +188,153 @@ void add_match(const char *A, const char *B)
 
 	map->next = curr_table->matches;
 	curr_table->matches = map;
+}
+
+static char *find_expr_label(struct expression *e)
+{
+	struct expr_map *emap;
+
+	if (!curr_table)
+		return NULL;
+
+	for (emap = curr_table->exprs; emap ; emap = emap->next) {
+		if (emap->e == e)
+			return emap->label;
+	}
+
+	return NULL;
+}
+
+static char *expr_op_connect(void *A, void *B, char *op)
+{
+	char *ret, *str;
+	char *labelA, *labelB;
+	char *a = NULL, *b = NULL;
+	int r;
+
+	labelA = find_expr_label(A);
+	labelB = find_expr_label(B);
+
+	if (labelA) {
+		r = asprintf(&a, "%s AS %s", show_expr(A), labelA);
+		if (r < 0)
+			die("asprintf");
+	}
+
+	if (labelB) {
+		r = asprintf(&b, "%s AS %s", show_expr(B), labelB);
+		if (r < 0)
+			die("asprintf");
+	}
+
+	r = asprintf(&str, "(%s %s %s)",
+		     a ? a : show_expr(A), op, b ? b : show_expr(B));
+	if (r < 0)
+		die("asprintf");
+	free(a);
+	free(b);
+
+	ret = store_str(str);
+	free(str);
+	return ret;
+}
+
+static char *show_raw_expr(struct expression *e)
+{
+	char *ret;
+
+	switch(e->type) {
+	case EXPR_FIELD:
+		ret = e->A;
+		break;
+	case EXPR_PLUS:
+		ret = expr_op_connect(e->A, e->B, "+");
+		break;
+	case EXPR_MINUS:
+		ret = expr_op_connect(e->A, e->B, "-");
+		break;
+	case EXPR_MULT:
+		ret = expr_op_connect(e->A, e->B, "*");
+		break;
+	case EXPR_DIVID:
+		ret = expr_op_connect(e->A, e->B, "/");
+		break;
+	}
+	return ret;
+}
+
+char *show_expr(void *expr)
+{
+	char *label = find_expr_label(expr);
+
+	if (label)
+		return label;
+
+	return show_raw_expr(expr);
+}
+
+static struct expression *create_expression(void *A, void *B, enum expr_type type)
+{
+	struct expression *e;
+
+	e = malloc(sizeof(*e));
+	if (!e)
+		die("malloc");
+	e->A = A;
+	e->B = B;
+	e->type = type;
+	e->table = curr_table;
+
+	return e;
+}
+
+void *add_plus(void *A, void *B)
+{
+	return create_expression(A, B, EXPR_PLUS);
+}
+
+void *add_minus(void *A, void *B)
+{
+	return create_expression(A, B, EXPR_MINUS);
+}
+
+void *add_mult(void *A, void *B)
+{
+	return create_expression(A, B, EXPR_MULT);
+}
+
+void *add_divid(void *A, void *B)
+{
+	return create_expression(A, B, EXPR_DIVID);
+}
+
+void add_expr(const char *label, void *A)
+{
+	struct expr_map *emap;
+
+	emap = malloc(sizeof(*emap));
+	if (!emap)
+		die("malloc");
+	emap->label = strdup(label);
+	emap->e = A;
+	if (!emap->e->table) {
+		free(emap);
+		return;
+	}
+
+	emap->next = emap->e->table->exprs;
+	emap->e->table->exprs = emap;
+}
+
+void *add_field(const char *field, const char *label)
+{
+	struct expression *e;
+
+	e = create_expression(store_str(field), NULL, EXPR_FIELD);
+	if (label)
+		add_expr(label, e);
+
+	return e;
 }
 
 static inline unsigned int quick_hash(const char *str)
@@ -319,15 +489,24 @@ static void dump_label_map(struct sql_table *table)
 {
 	struct label_map *lmap;
 	struct table_map *tmap;
+	struct expr_map *emap;
 
 	if (table->labels)
 		printf("%s Labels:\n", table->name);
 	for (lmap = table->labels; lmap; lmap = lmap->next) {
 		printf("  %s = %s\n", lmap->label, lmap->value);
 	}
+	if (table->tables)
+		printf("%s Tables:\n", table->name);
 	for (tmap = table->tables; tmap; tmap = tmap->next) {
 		printf("  %s = Table %s\n", tmap->name, tmap->table->name);
 	}
+	if (table->exprs)
+		printf("%s Expressions:\n", table->name);
+	for (emap = table->exprs; emap; emap = emap->next) {
+		printf("  %s = %s\n", emap->label, show_raw_expr(emap->e));
+	}
+
 }
 
 static void dump_match_map(struct sql_table *table)
@@ -354,9 +533,20 @@ static void dump_table(struct sql_table *table)
 	dump_table(table->sibling);
 }
 
+static void make_synthetic_events(struct sql_table *table)
+{
+	if (!table)
+		return;
+	
+	make_synthetic_events(table->children);
+	make_synthetic_events(table->sibling);
+}
+
 static void dump_tables(void)
 {
 	dump_table(curr_table);
+
+	make_synthetic_events(curr_table);
 }
 
 static void parse_it(void)

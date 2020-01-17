@@ -11,4 +11,13 @@ void table_start(void);
 void table_end(const char *name);
 void add_table(const char *name);
 
+char *show_expr(void *expr);
+void *add_plus(void *A, void *B);
+void *add_minus(void *A, void *B);
+void *add_mult(void *A, void *B);
+void *add_divid(void *A, void *B);
+void *add_field(const char *field, const char *label);
+
+void add_expr(const char *name, void *expr);
+
 #endif
