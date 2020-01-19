@@ -131,11 +131,16 @@ from_clause :
 					add_from($2);
 					$$ = store_printf("FROM %s", show_expr($2));
 				}
- | FROM '(' select_statement ')' label
+/*
+ * Select from a from clause confuses the variable parsing.
+ * disable it for now.
+
+   | FROM '(' select_statement ')' label
 				{
 					from_table_end($5);
 					$$ = store_printf("FROM (%s) AS %s", $3, $5);
 				}
+*/
  ;
 
 join_clause :
