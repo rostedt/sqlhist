@@ -128,8 +128,11 @@ table_exp :
  ;
 
 from_clause :
-   FROM item			{ $$ = store_printf("FROM %s", show_expr($2)); }
-
+   FROM item
+				{
+					add_from($2);
+					$$ = store_printf("FROM %s", show_expr($2));
+				}
  | FROM '(' select_statement ')' label
 				{
 					add_table($5); table_end($5);
@@ -140,7 +143,7 @@ from_clause :
  ;
 
 join_clause :
-  JOIN item	{ $$ = $2; }
+  JOIN item	{ add_to($2); $$ = $2; }
  ;
 
 on_clause :

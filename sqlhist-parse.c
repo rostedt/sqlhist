@@ -99,6 +99,8 @@ struct sql_table {
 	struct table_map	*tables;
 	struct selection	*selections;
 	struct selection	**next_selection;
+	const char		*from;
+	const char		*to;
 };
 
 static struct sql_table *curr_table;
@@ -123,15 +125,32 @@ void table_start(void)
 	curr_table = table;
 }
 
+void add_from(void *item)
+{
+	curr_table->from = show_expr(item);
+}
+
+void add_to(void *item)
+{
+	curr_table->to = show_expr(item);
+}
+
 void table_end(const char *name)
 {
-	if (name)
-		curr_table->name = store_str(name);
-	else
-		curr_table->name = store_str("Annonymous");
+	static int anony_cnt;
+	char *tname;
 
-	if (curr_table->parent)
+	if (!name)
+		tname = store_printf("Anonymous%d", anony_cnt++);
+	else
+		tname = store_str(name);
+
+	curr_table->name = tname;
+
+	if (curr_table->parent) {
 		curr_table = curr_table->parent;
+		curr_table->from = tname;
+	}
 }
 
 void add_table(const char *label)
@@ -601,14 +620,19 @@ static void dump_table(struct sql_table *table)
 static void make_synthetic_events(struct sql_table *table)
 {
 	struct selection *selection;
+	struct sql_table *save_curr = curr_table;
 
 	if (!table)
 		return;
+
+	curr_table = table;
 
 	printf("echo '%s", table->name);
 	for (selection = table->selections; selection; selection = selection->next)
 		printf(" (type) %s", selection->name);
 	printf("' > synthetic_events\n");
+
+	curr_table = save_curr;
 
 	make_synthetic_events(table->children);
 	make_synthetic_events(table->sibling);
@@ -643,11 +667,113 @@ static const char *resolve(struct sql_table *table, const char *label)
 	return label;
 }
 
+static void print_key(struct sql_table *table,
+		      const char *event,
+		      const char *key1, const char *key2)
+{
+	const char *p;
+	int len = strlen(event);
+
+	if ((p = strstr(key1,"."))) {
+		if (p - key1 == len && strncmp(event, key1, len) == 0)
+			printf("%s", p+1);
+	}
+	if ((p = strstr(key2,"."))) {
+		if (p - key2 == len && strncmp(event, key2, len) == 0)
+			printf("%s", p+1);
+	}
+}
+
+static void print_keys(struct sql_table *table, const char *event)
+{
+	struct match_map *map;
+	char *f, *p;
+	int start = 0;
+
+	f = strdup(event);
+	if ((p = strstr(f, ".")))
+		*p = '\0';
+
+	for (map = table->matches; map; map = map->next) {
+		if (start++)
+			printf(",");
+		print_key(table, f, expand(map->A), expand(map->B));
+	}
+	free(f);
+}
+
+enum value_type {
+	VALUE_TO,
+	VALUE_FROM,
+};
+
+static void print_value(struct sql_table *table,
+			const char *event, const char *value,
+			enum value_type type, bool *start)
+{
+	const char *p;
+	int len = strlen(event);
+
+	
+	printf("%s", value);
+}
+
+static void print_values(struct sql_table *table, const char *event,
+			 enum value_type type)
+{
+	struct selection *selection;
+	char *f, *p;
+	bool start = true;
+
+	f = strdup(event);
+	if ((p = strstr(f, ".")))
+		*p = '\0';
+
+	for (selection = table->selections; selection; selection = selection->next) {
+		print_value(table, event, selection->name, type, &start);
+	}
+	free(f);
+}
+
+static void make_histograms(struct sql_table *table)
+{
+	struct sql_table *save_curr = curr_table;
+	const char *from;
+	const char *to;
+
+	if (!table)
+		return;
+
+	/* Need to do children and younger siblings first */
+	make_histograms(table->children);
+	make_histograms(table->sibling);
+
+	curr_table = table;
+
+	from = resolve(table, table->from);
+	to = resolve(table, table->to);
+
+	printf("echo 'hist:keys=");
+	print_keys(table, from);
+	print_values(table, to, VALUE_TO);
+	printf("' > events/(system)/%s\n", from);
+
+	printf("echo 'hist:keys=");
+	print_keys(table, to);
+	print_values(table, from, VALUE_FROM);
+	printf(":onmatch(%s)' > events/(system)/%s\n", from, to);
+
+	curr_table = save_curr;
+}
+
 static void dump_tables(void)
 {
 	dump_table(curr_table);
 
+	printf("\n");
 	make_synthetic_events(curr_table);
+	printf("\n");
+	make_histograms(curr_table);
 }
 
 static void parse_it(void)
