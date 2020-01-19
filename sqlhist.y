@@ -27,9 +27,9 @@ extern void yyerror(char *fmt, ...);
 %type <string> name field label
 %type <string> selection_list table_exp selection_item
 %type <string> from_clause select_statement event_map
-%type <string> join_clause where_clause
+%type <string> where_clause
 
-%type <expr>  selection_expr item named_field
+%type <expr>  selection_expr item named_field join_clause 
 
 %%
 
@@ -66,7 +66,7 @@ selection_list :
 				}
  ;
 
-selection_item : selection_expr { $$ = show_expr($1); add_selection($1); }
+selection_item : selection_expr { $$ = store_str(show_expr($1)); add_selection($1); }
   ;
 
 selection_expr : 
@@ -115,7 +115,7 @@ name :
  ;
 
 event_map :
-   from_clause join_clause on_clause { $$ = store_printf("%s TO %s", $1, $2); }
+   from_clause join_clause on_clause { $$ = store_printf("%s TO %s", $1, show_expr($2)); }
  ;
 
 where_clause :
@@ -140,7 +140,7 @@ from_clause :
  ;
 
 join_clause :
-  JOIN item	{ $$ = store_str(show_expr($2)); }
+  JOIN item	{ $$ = $2; }
  ;
 
 on_clause :

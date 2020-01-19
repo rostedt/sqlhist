@@ -3,6 +3,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdbool.h>
 #include <errno.h>
 #include <unistd.h>
 
@@ -39,10 +40,16 @@ struct str_hash {
 
 static struct str_hash *str_hash[1 << HASH_BITS];
 
+enum label_type {
+	LABEL_STRING,
+	LABEL_EXPR,
+};
+
 struct label_map {
 	struct label_map	*next;
-	const char		*label;
-	const char		*value;
+	enum label_type		type;
+	char			*label;
+	void			*value;
 };
 
 struct match_map {
@@ -53,7 +60,8 @@ struct match_map {
 
 struct selection {
 	struct selection	*next;
-	char			*item;
+	char			*name;
+	void			*item;
 };
 
 enum expr_type {
@@ -73,12 +81,6 @@ struct expression {
 	struct sql_table	*table;
 };
 
-struct expr_map {
-	struct expr_map		*next;
-	struct expression	*e;
-	char			*label;
-};
-
 struct table_map {
 	struct table_map	*next;
 	char			*name;
@@ -94,7 +96,6 @@ struct sql_table {
 	struct label_map	*labels;
 	struct match_map	*matches;
 	struct table_map	*tables;
-	struct expr_map		*exprs;
 	struct selection	*selections;
 	struct selection	**next_selection;
 };
@@ -157,7 +158,7 @@ void add_table(const char *label)
 	curr_table->parent->tables = tmap;
 }
 
-void add_label(const char *label, const char *val)
+static void insert_label(const char *label, void *val, enum label_type type)
 {
 	struct label_map *lmap;
 	static int once;
@@ -172,10 +173,16 @@ void add_label(const char *label, const char *val)
 	if (!lmap)
 		die("malloc");
 	lmap->label = store_str(label);
-	lmap->value = store_str(val);
+	lmap->value = val;
+	lmap->type = type;
 
 	lmap->next = curr_table->labels;
 	curr_table->labels = lmap;
+}
+
+void add_label(const char *label, const char *val)
+{
+	insert_label(label, store_str(val), LABEL_STRING);
 }
 
 void add_match(const char *A, const char *B)
@@ -201,14 +208,14 @@ void add_match(const char *A, const char *B)
 
 static char *find_expr_label(struct expression *e)
 {
-	struct expr_map *emap;
+	struct label_map *lmap;
 
 	if (!curr_table)
 		return NULL;
 
-	for (emap = curr_table->exprs; emap ; emap = emap->next) {
-		if (emap->e == e)
-			return emap->label;
+	for (lmap = curr_table->labels; lmap ; lmap = lmap->next) {
+		if (lmap->type == LABEL_EXPR && lmap->value == e)
+			return lmap->label;
 	}
 
 	return NULL;
@@ -238,13 +245,15 @@ void add_selection(void *item)
 		add_expr(name, e);
 	}
 
-	selection->item = name;
+	selection->item = e;
+	selection->name = name;
 	selection->next = NULL;
 	*curr_table->next_selection = selection;
 	curr_table->next_selection = &selection->next;
 }
 
-static char *expr_op_connect(void *A, void *B, char *op)
+static char *expr_op_connect(void *A, void *B, char *op,
+			     const char *(*show)(void *A))
 {
 	char *ret, *str;
 	char *labelA, *labelB;
@@ -255,19 +264,19 @@ static char *expr_op_connect(void *A, void *B, char *op)
 	labelB = find_expr_label(B);
 
 	if (labelA) {
-		r = asprintf(&a, "%s AS %s", show_expr(A), labelA);
+		r = asprintf(&a, "%s AS %s", show(A), labelA);
 		if (r < 0)
 			die("asprintf");
 	}
 
 	if (labelB) {
-		r = asprintf(&b, "%s AS %s", show_expr(B), labelB);
+		r = asprintf(&b, "%s AS %s", show(B), labelB);
 		if (r < 0)
 			die("asprintf");
 	}
 
 	r = asprintf(&str, "(%s %s %s)",
-		     a ? a : show_expr(A), op, b ? b : show_expr(B));
+		     a ? a : show(A), op, b ? b : show(B));
 	if (r < 0)
 		die("asprintf");
 	free(a);
@@ -278,38 +287,73 @@ static char *expr_op_connect(void *A, void *B, char *op)
 	return ret;
 }
 
-static char *show_raw_expr(struct expression *e)
+static const char *show_raw_expr(void *e);
+static const char *resolve(struct sql_table *table, const char *label);
+
+static const char *expand(const char *str)
 {
+	char *exp = strdup(str);
+	const char *label;
+	const char *ret;
+	char *p;
+
+	if ((p = strstr(exp, "."))) {
+		*p = 0;
+		label = resolve(curr_table, exp);
+		ret = store_printf("%s.%s", label, p+1);
+		*p = '.';
+	} else {
+		ret = resolve(curr_table, str);
+	}
+	free(exp);
+	return ret;
+}
+
+static const char *__show_expr(struct expression *e, bool eval)
+{
+	const char *(*show)(void *);
 	char *ret;
+
+	if (eval)
+		show = show_raw_expr;
+	else
+		show = show_expr;
 
 	switch(e->type) {
 	case EXPR_FIELD:
 		ret = e->A;
+		if (eval)
+			return expand(e->A);
 		break;
 	case EXPR_PLUS:
-		ret = expr_op_connect(e->A, e->B, "+");
+		ret = expr_op_connect(e->A, e->B, "+", show);
 		break;
 	case EXPR_MINUS:
-		ret = expr_op_connect(e->A, e->B, "-");
+		ret = expr_op_connect(e->A, e->B, "-", show);
 		break;
 	case EXPR_MULT:
-		ret = expr_op_connect(e->A, e->B, "*");
+		ret = expr_op_connect(e->A, e->B, "*", show);
 		break;
 	case EXPR_DIVID:
-		ret = expr_op_connect(e->A, e->B, "/");
+		ret = expr_op_connect(e->A, e->B, "/", show);
 		break;
 	}
 	return ret;
 }
 
-char *show_expr(void *expr)
+static const char *show_raw_expr(void *e)
+{
+	return __show_expr(e, true);
+}
+
+const char *show_expr(void *expr)
 {
 	char *label = find_expr_label(expr);
 
 	if (label)
 		return label;
 
-	return show_raw_expr(expr);
+	return __show_expr(expr, false);
 }
 
 static struct expression *create_expression(void *A, void *B, enum expr_type type)
@@ -349,20 +393,7 @@ void *add_divid(void *A, void *B)
 
 void add_expr(const char *label, void *A)
 {
-	struct expr_map *emap;
-
-	emap = malloc(sizeof(*emap));
-	if (!emap)
-		die("malloc");
-	emap->label = strdup(label);
-	emap->e = A;
-	if (!emap->e->table) {
-		free(emap);
-		return;
-	}
-
-	emap->next = emap->e->table->exprs;
-	emap->e->table->exprs = emap;
+	insert_label(label, A, LABEL_EXPR);
 }
 
 void *add_field(const char *field, const char *label)
@@ -528,24 +559,26 @@ static void dump_label_map(struct sql_table *table)
 {
 	struct label_map *lmap;
 	struct table_map *tmap;
-	struct expr_map *emap;
 
 	if (table->labels)
 		printf("%s Labels:\n", table->name);
 	for (lmap = table->labels; lmap; lmap = lmap->next) {
-		printf("  %s = %s\n", lmap->label, lmap->value);
+		switch (lmap->type) {
+		case LABEL_STRING:
+			printf("  %s = %s\n",
+			       lmap->label, (char *)lmap->value);
+			break;
+		case LABEL_EXPR:
+			printf("  %s = (%s)\n", lmap->label,
+			       show_raw_expr(lmap->value));
+			break;
+		}
 	}
 	if (table->tables)
 		printf("%s Tables:\n", table->name);
 	for (tmap = table->tables; tmap; tmap = tmap->next) {
 		printf("  %s = Table %s\n", tmap->name, tmap->table->name);
 	}
-	if (table->exprs)
-		printf("%s Expressions:\n", table->name);
-	for (emap = table->exprs; emap; emap = emap->next) {
-		printf("  %s = %s\n", emap->label, show_raw_expr(emap->e));
-	}
-
 }
 
 static void dump_match_map(struct sql_table *table)
@@ -561,12 +594,18 @@ static void dump_match_map(struct sql_table *table)
 
 static void dump_table(struct sql_table *table)
 {
+	struct sql_table *save_curr = curr_table;
+
 	if (!table)
 		return;
+
+	curr_table = table;
 
 	printf("\nTable: %s\n", table->name);
 	dump_label_map(table);
 	dump_match_map(table);
+
+	curr_table = save_curr;
 
 	dump_table(table->children);
 	dump_table(table->sibling);
@@ -579,13 +618,42 @@ static void make_synthetic_events(struct sql_table *table)
 	if (!table)
 		return;
 
-	printf("%s", table->name);
+	printf("echo '%s", table->name);
 	for (selection = table->selections; selection; selection = selection->next)
-		printf(" (type) %s", selection->item);
-	printf(" > synthetic_events\n");
+		printf(" (type) %s", selection->name);
+	printf("' > synthetic_events\n");
 
 	make_synthetic_events(table->children);
 	make_synthetic_events(table->sibling);
+}
+
+static const char *resolve(struct sql_table *table, const char *label)
+{
+	struct sql_table *save_curr = curr_table;
+	struct label_map *lmap;
+	struct expression *e;
+
+	curr_table = table;
+
+	for (lmap = table->labels; lmap; lmap = lmap->next)
+		if (strcmp(lmap->label, label) == 0)
+			break;
+
+	if (lmap) {
+		switch (lmap->type) {
+		case LABEL_STRING:
+			label = (char *)lmap->value;
+			break;
+		case LABEL_EXPR:
+			e = lmap->value;
+			label = show_raw_expr(e);
+			break;
+		}
+	}
+
+	curr_table = save_curr;
+
+	return label;
 }
 
 static void dump_tables(void)
