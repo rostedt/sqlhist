@@ -47,14 +47,13 @@ label : AS name { $$ = store_printf("%s", $2); }
  | name
  ;
 
-select : SELECT  { table_start(); printf("starting SELECT\n"); }
+select : SELECT  { table_start(); }
   ;
 
 select_statement :
     select selection_list table_exp
 				{
 					$$ = store_printf("SELECT %s %s", $2, $3);
-					printf("%s\n", $$);
 				}
   ;
 
@@ -91,7 +90,6 @@ selection_expr :
  | '(' selection_expr ')' label
 			{
 				add_expr($4, $2);
-				printf("add expr %s\n", show_expr($2));
 				$$ = $2;
 			}
  ;
@@ -111,7 +109,7 @@ named_field :
  ;
 
 name :
-   STRING { printf("name = %s\n", $$); }
+   STRING
  ;
 
 event_map :

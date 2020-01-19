@@ -998,24 +998,23 @@ static void make_histograms(struct sql_table *table)
 
 static void dump_tables(void)
 {
-	dump_table(curr_table);
+	static int debug;
 
-	printf("\n");
-	make_synthetic_events(curr_table);
-	printf("\n");
-	make_histograms(curr_table);
+	if (!debug)
+		return;
+
+	dump_table(curr_table);
 }
 
-static void parse_it(void)
+static int parse_it(void)
 {
 	int ret;
 
-	printf("parsing\n");
-
 	ret = yyparse();
-	printf("ret = %d\n", ret);
 
 	dump_tables();
+
+	return ret;
 }
 
 static char *buffer;
@@ -1063,6 +1062,11 @@ int main (int argc, char **argv)
 	}
 
 	parse_it();
+
+	printf("\n");
+	make_synthetic_events(curr_table);
+	printf("\n");
+	make_histograms(curr_table);
 
 	return 0;
 }
