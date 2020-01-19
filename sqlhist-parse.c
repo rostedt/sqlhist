@@ -633,6 +633,7 @@ static void print_synthetic_field(struct sql_table *table, struct selection *sel
 	const char *name;
 	const char *actual;
 	const char *field;
+	const char *to;
 	int len;
 
 	printf(" (type) ");
@@ -645,10 +646,11 @@ static void print_synthetic_field(struct sql_table *table, struct selection *sel
 		return;
 	}
 
-	len = strlen(table->to);
+	to = resolve(table, table->to);
+	len = strlen(to);
 
 	actual = show_raw_expr(e);
-	field = event_match(table->to, actual, len);
+	field = event_match(to, actual, len);
 	if (field) {
 		printf("%s", field);
 		return;
@@ -912,6 +914,47 @@ static void print_values(struct sql_table *table, const char *event,
 	free(f);
 }
 
+static void print_trace_field(struct sql_table *table, struct selection *selection)
+{
+	struct expression *e = selection->item;
+	const char *name;
+	const char *actual;
+	const char *field;
+	const char *to;
+	int len;
+
+	name = selection->name;
+	if (!name)
+		name = e->name;
+	if (name) {
+		printf(",$%s", name);
+		return;
+	}
+
+	to = resolve(table, table->to);
+	len = strlen(to);
+
+	actual = show_raw_expr(e);
+	field = event_match(to, actual, len);
+	if (field) {
+		printf(",%s", field);
+		return;
+	}
+
+	printf(",ERROR");
+}
+
+static void print_trace(struct sql_table *table)
+{
+	struct selection *selection;
+
+	printf(".trace(%s", table->name);
+
+	for (selection = table->selections; selection; selection = selection->next)
+		print_trace_field(table, selection);
+	printf(")");
+}
+
 static void make_histograms(struct sql_table *table)
 {
 	struct sql_table *save_curr = curr_table;
@@ -939,7 +982,10 @@ static void make_histograms(struct sql_table *table)
 	printf("echo 'hist:keys=");
 	print_keys(table, to);
 	print_values(table, to, VALUE_TO, &vars);
-	printf(":onmatch(%s)' > events/(system)/%s/trigger\n", from, to);
+	printf(":onmatch(%s)", from);
+
+	print_trace(table); 
+	printf("' > events/(system)/%s/trigger\n", to);
 
 	while (vars) {
 		struct var_list *v = vars;
