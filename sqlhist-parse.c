@@ -60,7 +60,7 @@ struct match_map {
 
 struct selection {
 	struct selection	*next;
-	char			*name;
+	const char		*name;
 	void			*item;
 };
 
@@ -78,6 +78,7 @@ struct expression {
 	enum expr_type		type;
 	void			*A;
 	void			*B;
+	const char		*name;
 	struct sql_table	*table;
 };
 
@@ -206,28 +207,13 @@ void add_match(const char *A, const char *B)
 	curr_table->matches = map;
 }
 
-static char *find_expr_label(struct expression *e)
-{
-	struct label_map *lmap;
-
-	if (!curr_table)
-		return NULL;
-
-	for (lmap = curr_table->labels; lmap ; lmap = lmap->next) {
-		if (lmap->type == LABEL_EXPR && lmap->value == e)
-			return lmap->label;
-	}
-
-	return NULL;
-}
-
 void add_selection(void *item)
 {
 	struct selection *selection;
 	struct expression *e = item;
 	static int once;
 	static int arg_cnt;
-	char *name;
+	const char *name;
 
 	if (!curr_table) {
 		if (!once++)
@@ -239,7 +225,7 @@ void add_selection(void *item)
 	if (!selection)
 		die("malloc");
 
-	name = find_expr_label(e);
+	name = e->name;
 	if (!name) {
 		name = store_printf("__arg%d__", arg_cnt++);
 		add_expr(name, e);
@@ -255,22 +241,20 @@ void add_selection(void *item)
 static char *expr_op_connect(void *A, void *B, char *op,
 			     const char *(*show)(void *A))
 {
-	char *ret, *str;
-	char *labelA, *labelB;
+	struct expression *eA = A;
+	struct expression *eB = B;
 	char *a = NULL, *b = NULL;
+	char *ret, *str;
 	int r;
 
-	labelA = find_expr_label(A);
-	labelB = find_expr_label(B);
-
-	if (labelA) {
-		r = asprintf(&a, "%s AS %s", show(A), labelA);
+	if (eA->name) {
+		r = asprintf(&a, "%s AS %s", show(A), eA->name);
 		if (r < 0)
 			die("asprintf");
 	}
 
-	if (labelB) {
-		r = asprintf(&b, "%s AS %s", show(B), labelB);
+	if (eB->name) {
+		r = asprintf(&b, "%s AS %s", show(B), eB->name);
 		if (r < 0)
 			die("asprintf");
 	}
@@ -348,10 +332,10 @@ static const char *show_raw_expr(void *e)
 
 const char *show_expr(void *expr)
 {
-	char *label = find_expr_label(expr);
+	struct expression *e = expr;
 
-	if (label)
-		return label;
+	if (e->name)
+		return e->name;
 
 	return __show_expr(expr, false);
 }
@@ -360,7 +344,7 @@ static struct expression *create_expression(void *A, void *B, enum expr_type typ
 {
 	struct expression *e;
 
-	e = malloc(sizeof(*e));
+	e = calloc(sizeof(*e), 1);
 	if (!e)
 		die("malloc");
 	e->A = A;
@@ -393,7 +377,10 @@ void *add_divid(void *A, void *B)
 
 void add_expr(const char *label, void *A)
 {
+	struct expression *e = A;
+
 	insert_label(label, A, LABEL_EXPR);
+	e->name = store_str(label);
 }
 
 void *add_field(const char *field, const char *label)
