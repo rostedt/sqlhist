@@ -625,12 +625,9 @@ static void dump_table(struct sql_table *table)
 
 static const char *event_match(const char *event, const char *val, int len)
 {
-	const char *p;
+	if (strncmp(event, val, len) == 0 && val[len] == '.')
+		return val + len + 1;
 
-	p = strstr(val, ".");
-
-	if (p && (p - val) == len && strncmp(event, val, len) == 0)
-		return p+1;
 	return NULL;
 }
 
