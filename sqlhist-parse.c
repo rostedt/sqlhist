@@ -231,8 +231,6 @@ void add_selection(void *item)
 	struct selection *selection;
 	struct expression *e = item;
 	static int once;
-	static int arg_cnt;
-	const char *name;
 
 	if (!curr_table) {
 		if (!once++)
@@ -244,14 +242,8 @@ void add_selection(void *item)
 	if (!selection)
 		die("malloc");
 
-	name = e->name;
-	if (!name) {
-		name = store_printf("__arg%d__", arg_cnt++);
-		add_expr(name, e);
-	}
-
 	selection->item = e;
-	selection->name = name;
+	selection->name = e->name;
 	selection->next = NULL;
 	*curr_table->next_selection = selection;
 	curr_table->next_selection = &selection->next;
@@ -617,6 +609,63 @@ static void dump_table(struct sql_table *table)
 	dump_table(table->sibling);
 }
 
+static const char *event_match(const char *event, const char *val, int len)
+{
+	const char *p;
+
+	p = strstr(val, ".");
+
+	if (p && (p - val) == len && strncmp(event, val, len) == 0)
+		return p+1;
+	return NULL;
+}
+
+static char * make_dynamic_arg(void)
+{
+	static int arg_cnt;
+
+	return store_printf("__arg%d__", arg_cnt++);
+}
+
+static void print_synthetic_field(struct sql_table *table, struct selection *selection)
+{
+	struct expression *e = selection->item;
+	const char *name;
+	const char *actual;
+	const char *field;
+	int len;
+
+	printf(" (type) ");
+
+	name = selection->name;
+	if (!name)
+		name = e->name;
+	if (name) {
+		printf("%s", name);
+		return;
+	}
+
+	len = strlen(table->to);
+
+	actual = show_raw_expr(e);
+	field = event_match(table->to, actual, len);
+	if (field) {
+		printf("%s", field);
+		return;
+	}
+
+	selection->name = make_dynamic_arg();
+	e->name = selection->name;
+
+	field = strstr(actual, ".");
+	if (field) {
+		/* Need to check for common_timestamp */
+		printf("%s", field + 1);
+	} else {
+		printf("%s", e->name);
+	}
+}
+
 static void make_synthetic_events(struct sql_table *table)
 {
 	struct selection *selection;
@@ -629,7 +678,8 @@ static void make_synthetic_events(struct sql_table *table)
 
 	printf("echo '%s", table->name);
 	for (selection = table->selections; selection; selection = selection->next)
-		printf(" (type) %s", selection->name);
+		print_synthetic_field(table, selection);
+
 	printf("' > synthetic_events\n");
 
 	curr_table = save_curr;
@@ -671,17 +721,16 @@ static void print_key(struct sql_table *table,
 		      const char *event,
 		      const char *key1, const char *key2)
 {
-	const char *p;
 	int len = strlen(event);
+	const char *field;
 
-	if ((p = strstr(key1,"."))) {
-		if (p - key1 == len && strncmp(event, key1, len) == 0)
-			printf("%s", p+1);
-	}
-	if ((p = strstr(key2,"."))) {
-		if (p - key2 == len && strncmp(event, key2, len) == 0)
-			printf("%s", p+1);
-	}
+	field = event_match(event, key1, len);
+	if (field) 
+		printf("%s", field);
+
+	field = event_match(event, key2, len);
+	if (field)
+		printf("%s", field);
 }
 
 static void print_keys(struct sql_table *table, const char *event)
@@ -707,19 +756,147 @@ enum value_type {
 	VALUE_FROM,
 };
 
-static void print_value(struct sql_table *table,
-			const char *event, const char *value,
-			enum value_type type, bool *start)
+static void print_val_delim(bool *start)
 {
-	const char *p;
+	if (*start) {
+		printf(":");
+		*start = false;
+	} else
+		printf(",");
+}
+
+struct var_list {
+	struct var_list		*next;
+	const char		*var;
+	const char		*val;
+};
+
+static const char *find_var(struct var_list **vars, const char *val)
+{
+	struct var_list *v;
+	
+	for (v = *vars; v; v = v->next) {
+		if (strcmp(v->val, val) == 0)
+		    return v->var;
+	}
+
+	return NULL;
+}
+
+static void add_var(struct var_list **vars, const char *var, const char *val)
+{
+	struct var_list *v;
+
+	v = malloc(sizeof(*v));
+	if (!v)
+		die("malloc");
+	v->var = var;
+	v->val = val;
+	v->next = *vars;
+	*vars = v;
+}
+
+static void print_to_expr(struct sql_table *table, const char *event,
+			  struct expression *e,
+			  struct var_list **vars)
+{
+	const char *actual;
+	const char *field;
 	int len = strlen(event);
 
-	
-	printf("%s", value);
+	switch (e->type) {
+	case EXPR_FIELD:
+		actual = show_raw_expr(e);
+		field = event_match(event, actual, len);
+		if (field) {
+			printf("%s", field);
+			break;
+		}
+
+		field = strstr(actual, ".");
+		if (!field) {
+			printf("%s", field);
+			break;
+		}
+		printf("$%s", find_var(vars, actual));
+		break;
+	default:
+		print_to_expr(table, event, e->A, vars);
+		switch (e->type) {
+		case EXPR_PLUS:		printf("+");	break;
+		case EXPR_MINUS:	printf("-");	break;
+		case EXPR_MULT:		printf("*");	break;
+		case EXPR_DIVID:	printf("/");	break;
+		default: break;
+		}
+		print_to_expr(table, event, e->B, vars);
+	}
+}
+
+static void print_from_expr(struct sql_table *table, const char *event,
+			    struct expression *e, bool *start,
+			    struct var_list **vars)
+{
+	const char *actual;
+	const char *field;
+	int len = strlen(event);
+
+	switch (e->type) {
+	case EXPR_FIELD:
+		actual = show_raw_expr(e);
+		field = event_match(event, actual, len);
+		if (field && !find_var(vars, actual)) {
+			print_val_delim(start);
+			printf("%s=%s", e->name, field);
+			add_var(vars, e->name, actual);
+			break;
+		}
+		break;
+	default:
+		print_from_expr(table, event, e->A, start, vars);
+		print_from_expr(table, event, e->B, start, vars);
+	}
+}
+
+static void print_value(struct sql_table *table,
+			const char *event, struct selection *selection,
+			enum value_type type, bool *start, struct var_list **vars)
+{
+	struct expression *e = selection->item;
+	const char *name = selection->name;
+	int len = strlen(event);
+	const char *actual;
+	const char *field;
+
+	switch (e->type) {
+	case EXPR_FIELD:
+		if (!selection->name)
+			break;
+		actual = show_raw_expr(e);
+		field = event_match(event, actual, len);
+		if (field) {
+			print_val_delim(start);
+			if (e->name)
+				printf("%s=", e->name);
+			printf("%s", field);
+			add_var(vars, e->name, actual);
+		}
+		break;
+	default:
+		if (type == VALUE_TO) {
+			print_val_delim(start);
+			printf("%s=", name);
+			print_to_expr(table, event, e, vars);
+		} else {
+			print_from_expr(table, event, e, start, vars);
+		}
+		break;
+	}
+
 }
 
 static void print_values(struct sql_table *table, const char *event,
-			 enum value_type type)
+			 enum value_type type, struct var_list **vars)
 {
 	struct selection *selection;
 	char *f, *p;
@@ -730,7 +907,7 @@ static void print_values(struct sql_table *table, const char *event,
 		*p = '\0';
 
 	for (selection = table->selections; selection; selection = selection->next) {
-		print_value(table, event, selection->name, type, &start);
+		print_value(table, event, selection, type, &start, vars);
 	}
 	free(f);
 }
@@ -738,6 +915,7 @@ static void print_values(struct sql_table *table, const char *event,
 static void make_histograms(struct sql_table *table)
 {
 	struct sql_table *save_curr = curr_table;
+	struct var_list *vars = NULL;
 	const char *from;
 	const char *to;
 
@@ -755,13 +933,19 @@ static void make_histograms(struct sql_table *table)
 
 	printf("echo 'hist:keys=");
 	print_keys(table, from);
-	print_values(table, to, VALUE_TO);
-	printf("' > events/(system)/%s\n", from);
+	print_values(table, from, VALUE_FROM, &vars);
+	printf("' > events/(system)/%s/trigger\n", from);
 
 	printf("echo 'hist:keys=");
 	print_keys(table, to);
-	print_values(table, from, VALUE_FROM);
-	printf(":onmatch(%s)' > events/(system)/%s\n", from, to);
+	print_values(table, to, VALUE_TO, &vars);
+	printf(":onmatch(%s)' > events/(system)/%s/trigger\n", from, to);
+
+	while (vars) {
+		struct var_list *v = vars;
+		vars = v->next;
+		free(v);
+	}
 
 	curr_table = save_curr;
 }
