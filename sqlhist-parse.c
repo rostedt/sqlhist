@@ -86,14 +86,12 @@ struct table_map {
 	struct table_map	*next;
 	char			*name;
 	struct sql_table	*table;
-	struct expression	*expressions;
 };
 
 struct sql_table {
 	char			*name;
 	struct sql_table	*parent;
-	struct sql_table	*children;
-	struct sql_table	*sibling;
+	struct sql_table	*child;
 	struct label_map	*labels;
 	struct match_map	*matches;
 	struct table_map	*tables;
@@ -104,6 +102,19 @@ struct sql_table {
 };
 
 static struct sql_table *curr_table;
+static struct sql_table *top_table;
+static struct table_map *table_list;
+
+static int no_table(void)
+{
+	static int once;
+
+	if (curr_table)
+		return 0;
+	if (!once++)
+		printf("No table?\n");
+	return 1;
+}
 
 void table_start(void)
 {
@@ -116,11 +127,10 @@ void table_start(void)
 	table->next_selection = &table->selections;
 
 	table->parent = curr_table;
-	if (curr_table) {
-		if (curr_table->children)
-			table->sibling = curr_table->children;
-		curr_table->children = table;
-	}
+	if (curr_table)
+		curr_table->child = table;
+	else
+		top_table = table;
 
 	curr_table = table;
 }
@@ -135,6 +145,34 @@ void add_to(void *item)
 	curr_table->to = show_expr(item);
 }
 
+static void add_table(const char *label)
+{
+	struct table_map *tmap;
+
+	if (no_table())
+		return;
+
+	tmap = malloc(sizeof(*tmap));
+	if (!tmap)
+		die("malloc");
+
+	tmap->table = curr_table;
+	tmap->name = store_str(label);
+
+	tmap->next = table_list;
+	table_list = tmap;
+}
+
+static struct sql_table *find_table(const char *name)
+{
+	struct table_map *tmap;
+
+	for (tmap = table_list; tmap; tmap = tmap->next)
+		if (strcmp(tmap->name, name) == 0)
+			return tmap->table;
+	return NULL;
+}
+
 void table_end(const char *name)
 {
 	static int anony_cnt;
@@ -145,47 +183,30 @@ void table_end(const char *name)
 	else
 		tname = store_str(name);
 
-	curr_table->name = tname;
+	add_table(tname);
 
-	if (curr_table->parent) {
-		curr_table = curr_table->parent;
-		curr_table->from = tname;
-	}
+	curr_table->name = tname;
+	curr_table = curr_table->parent;
 }
 
-void add_table(const char *label)
+void from_table_end(const char *name)
 {
-	struct table_map *tmap;
-	static int once;
+	if (curr_table->parent)
+		curr_table->parent->from = store_str(name);
 
-	if (!curr_table) {
-		if (!once++)
-			printf("No table?\n");
-		return;
-	}
-
-	if (!curr_table->parent)
-		return;
-
-	tmap = malloc(sizeof(*tmap));
-	if (!tmap)
-		die("malloc");
-
-	tmap->table = curr_table;
-	tmap->name = store_str(label);
-
-	tmap->next = curr_table->parent->tables;
-	curr_table->parent->tables = tmap;
+	table_end(name);
 }
 
 static void insert_label(const char *label, void *val, enum label_type type)
 {
 	struct label_map *lmap;
-	static int once;
+	struct sql_table *table = curr_table;
 
-	if (!curr_table) {
-		if (!once++)
-			printf("No table?\n");
+	if (!table)
+		table = top_table;
+
+	if (!table) {
+		no_table();
 		return;
 	}
 
@@ -196,8 +217,8 @@ static void insert_label(const char *label, void *val, enum label_type type)
 	lmap->value = val;
 	lmap->type = type;
 
-	lmap->next = curr_table->labels;
-	curr_table->labels = lmap;
+	lmap->next = table->labels;
+	table->labels = lmap;
 }
 
 void add_label(const char *label, const char *val)
@@ -208,13 +229,9 @@ void add_label(const char *label, const char *val)
 void add_match(const char *A, const char *B)
 {
 	struct match_map *map;
-	static int once;
 
-	if (!curr_table) {
-		if (!once++)
-			printf("No table?\n");
+	if (no_table())
 		return;
-	}
 
 	map = malloc(sizeof(*map));
 	if (!map)
@@ -230,13 +247,9 @@ void add_selection(void *item)
 {
 	struct selection *selection;
 	struct expression *e = item;
-	static int once;
 
-	if (!curr_table) {
-		if (!once++)
-			printf("No table?\n");
+	if (no_table())
 		return;
-	}
 
 	selection = malloc(sizeof(*selection));
 	if (!selection)
@@ -597,6 +610,8 @@ static void dump_table(struct sql_table *table)
 	if (!table)
 		return;
 
+	dump_table(find_table(table->from));
+
 	curr_table = table;
 
 	printf("\nTable: %s\n", table->name);
@@ -605,8 +620,7 @@ static void dump_table(struct sql_table *table)
 
 	curr_table = save_curr;
 
-	dump_table(table->children);
-	dump_table(table->sibling);
+	dump_table(find_table(table->to));
 }
 
 static const char *event_match(const char *event, const char *val, int len)
@@ -676,6 +690,8 @@ static void make_synthetic_events(struct sql_table *table)
 	if (!table)
 		return;
 
+	make_synthetic_events(find_table(table->from));
+
 	curr_table = table;
 
 	printf("echo '%s", table->name);
@@ -686,8 +702,7 @@ static void make_synthetic_events(struct sql_table *table)
 
 	curr_table = save_curr;
 
-	make_synthetic_events(table->children);
-	make_synthetic_events(table->sibling);
+	make_synthetic_events(find_table(table->to));
 }
 
 static const char *resolve(struct sql_table *table, const char *label)
@@ -966,8 +981,7 @@ static void make_histograms(struct sql_table *table)
 		return;
 
 	/* Need to do children and younger siblings first */
-	make_histograms(table->children);
-	make_histograms(table->sibling);
+	make_histograms(find_table(table->from));
 
 	curr_table = table;
 
@@ -994,6 +1008,8 @@ static void make_histograms(struct sql_table *table)
 	}
 
 	curr_table = save_curr;
+
+	make_histograms(find_table(table->to));
 }
 
 static void dump_tables(void)
@@ -1064,9 +1080,9 @@ int main (int argc, char **argv)
 	parse_it();
 
 	printf("\n");
-	make_synthetic_events(curr_table);
+	make_synthetic_events(top_table);
 	printf("\n");
-	make_histograms(curr_table);
+	make_histograms(top_table);
 
 	return 0;
 }

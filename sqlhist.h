@@ -9,7 +9,7 @@ void add_label(const char *label, const char *val);
 void add_match(const char *A, const char *B);
 void table_start(void);
 void table_end(const char *name);
-void add_table(const char *name);
+void from_table_end(const char *name);
 
 const char *show_expr(void *expr);
 void *add_plus(void *A, void *B);

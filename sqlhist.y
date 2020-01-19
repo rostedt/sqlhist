@@ -133,11 +133,9 @@ from_clause :
 				}
  | FROM '(' select_statement ')' label
 				{
-					add_table($5); table_end($5);
+					from_table_end($5);
 					$$ = store_printf("FROM (%s) AS %s", $3, $5);
 				}
- | FROM '(' select_statement ')'
-				{ table_end(NULL); $$ = store_printf("FROM ($s)", $3); }
  ;
 
 join_clause :
