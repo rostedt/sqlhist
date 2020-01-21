@@ -1,0 +1,22 @@
+This repo is just used to test parsing sql commands to create commands to
+add Linux kernel histogram logic:
+
+ (read https://www.kernel.org/doc/Documentation/trace/histogram.rst)
+
+This is a testbed for trace-cmd start --sql '...' commands, which will hopeful
+turn into:
+
+ trace-cmd start \
+    --sql '(select start.common_timestamp as start_time, end.common_timestamp as end_time, start.pid,
+                   (start_time - end_time) as delta
+            from sched_waking as start
+            join sched_switch as end
+              on start.pid = end.next_pid) as first'
+
+Will produce:
+
+ # echo 'first u64 start_time u64 end_time pid_t pid u64 delta' >> synthetic_events 
+ # echo 'hist:keys=pid:start=common_timestamp' > events/sched/sched_waking/trigger 
+ # echo 'hist:keys=next_pid:start2=$start,delta=common_timestamp-$start:onmatch(sched.sched_waking).trace(first,$start2,common_timestamp,next_pid,$delta)' > events/sched/sched_switch/trigger
+
+
