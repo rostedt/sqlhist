@@ -197,6 +197,12 @@ void from_table_end(const char *name)
 	table_end(name);
 }
 
+/* Just a histogram table */
+void simple_table_end(void)
+{
+
+}
+
 static void insert_label(const char *label, void *val, enum label_type type)
 {
 	struct label_map *lmap;
@@ -684,7 +690,7 @@ static void make_synthetic_events(struct sql_table *table)
 	struct selection *selection;
 	struct sql_table *save_curr = curr_table;
 
-	if (!table)
+	if (!table || !table->to)
 		return;
 
 	make_synthetic_events(find_table(table->from));
@@ -749,20 +755,34 @@ static void print_key(struct sql_table *table,
 
 static void print_keys(struct sql_table *table, const char *event)
 {
+	struct selection *selection;
 	struct match_map *map;
+	struct expression *e;
 	char *f, *p;
 	int start = 0;
 
-	f = strdup(event);
-	if ((p = strstr(f, ".")))
-		*p = '\0';
+	if (event) {
+		f = strdup(event);
+		if ((p = strstr(f, ".")))
+			*p = '\0';
 
-	for (map = table->matches; map; map = map->next) {
-		if (start++)
-			printf(",");
-		print_key(table, f, expand(map->A), expand(map->B));
+		for (map = table->matches; map; map = map->next) {
+			if (start++)
+				printf(",");
+			print_key(table, f, expand(map->A), expand(map->B));
+		}
+
+		free(f);
+	} else {
+		for (selection = table->selections; selection; selection = selection->next) {
+			e = selection->item;
+			if (!e->name || strncmp(e->name, "key", 3) != 0)
+				continue;
+			if (start++)
+				printf(",");
+			printf("%s", show_raw_expr(e));
+		}
 	}
-	free(f);
 }
 
 enum value_type {
@@ -913,17 +933,33 @@ static void print_values(struct sql_table *table, const char *event,
 			 enum value_type type, struct var_list **vars)
 {
 	struct selection *selection;
+	struct expression *e;
 	char *f, *p;
 	bool start = true;
 
-	f = strdup(event);
-	if ((p = strstr(f, ".")))
-		*p = '\0';
+	if (event) {
+		f = strdup(event);
+		if ((p = strstr(f, ".")))
+			*p = '\0';
 
-	for (selection = table->selections; selection; selection = selection->next) {
-		print_value(table, event, selection, type, &start, vars);
+		for (selection = table->selections; selection; selection = selection->next) {
+			print_value(table, f, selection, type, &start, vars);
+		}
+		free(f);
+	} else {
+		for (selection = table->selections; selection; selection = selection->next) {
+			e = selection->item;
+			if (e->name && strncmp(e->name, "key", 3) == 0)
+				continue;
+			if (start) {
+				printf(":values=");
+				start = false;
+			} else {
+				printf(",");
+			}
+			printf("%s", show_raw_expr(e));
+		}
 	}
-	free(f);
 }
 
 static void print_trace_field(struct sql_table *table, struct selection *selection)
@@ -971,7 +1007,7 @@ static void make_histograms(struct sql_table *table)
 {
 	struct sql_table *save_curr = curr_table;
 	struct var_list *vars = NULL;
-	const char *from;
+	const char *from = NULL;
 	const char *to;
 
 	if (!table)
@@ -982,15 +1018,19 @@ static void make_histograms(struct sql_table *table)
 
 	curr_table = table;
 
-	from = resolve(table, table->from);
-	to = resolve(table, table->to);
+	if (table->to)
+		from = resolve(table, table->from);
 
 	printf("echo 'hist:keys=");
 	print_keys(table, from);
 	print_values(table, from, VALUE_FROM, &vars);
 	printf("' > events/(system)/%s/trigger\n", from);
 
+	if (!table->to)
+		goto out;
+
 	printf("echo 'hist:keys=");
+	to = resolve(table, table->to);
 	print_keys(table, to);
 	print_values(table, to, VALUE_TO, &vars);
 	printf(":onmatch(%s)", from);
@@ -1004,6 +1044,7 @@ static void make_histograms(struct sql_table *table)
 		free(v);
 	}
 
+ out:
 	curr_table = save_curr;
 
 	make_histograms(find_table(table->to));

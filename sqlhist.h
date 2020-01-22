@@ -10,6 +10,7 @@ void add_match(const char *A, const char *B);
 void table_start(void);
 void table_end(const char *name);
 void from_table_end(const char *name);
+void simple_table_end(void);
 
 const char *show_expr(void *expr);
 void *add_plus(void *A, void *B);

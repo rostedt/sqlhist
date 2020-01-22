@@ -29,13 +29,14 @@ extern void yyerror(char *fmt, ...);
 %type <string> from_clause select_statement event_map
 %type <string> where_clause
 
-%type <expr>  selection_expr item named_field join_clause 
+%type <expr>  selection_expr item named_field join_clause
 
 %%
 
 start:
    select_statement { table_end(NULL); }
  | select_name
+ | simple_select { simple_table_end(); }
  ;
 
 select_name :
@@ -48,6 +49,11 @@ label : AS name { $$ = store_printf("%s", $2); }
  ;
 
 select : SELECT  { table_start(); }
+  ;
+
+simple_select :
+     select selection_list from_clause
+  |  select selection_list from_clause where_clause
   ;
 
 select_statement :
