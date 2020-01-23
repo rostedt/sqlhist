@@ -954,6 +954,8 @@ static void print_from_expr(struct sql_table *table, const char *event,
 		field = event_match(event, actual, len);
 		if (field && !find_var(vars, actual)) {
 			print_val_delim(start);
+			if (!e->name)
+				e->name = make_dynamic_arg();
 			printf("%s=%s", e->name, field);
 			add_var(vars, e->name, actual);
 			break;
