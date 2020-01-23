@@ -1,6 +1,12 @@
 #ifndef __SQLHIST_H
 #define __SQLHIST_H
 
+#ifdef HAVE_TRACEFS
+#include <tracefs/tracefs.h>
+#else
+#include "tracefs-stubs.h"
+#endif
+
 #include "sqlhist.tab.h"
 
 char * store_str(const char *str);

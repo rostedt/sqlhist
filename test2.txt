@@ -1,10 +1,6 @@
-select first.end_time as start_time, next.common_timestamp as end_time, first.pid,
-   (end_time - first_time) as delta2,
-   (end_time - first_time + first.delta) as total_delta
-      from (select start.common_timestamp as first_time, end.common_timestamp as end_time, start.pid,
-                   (end.common_timestamp - start.common_timestamp) as delta
-            from sched_waking as start
+(select start.common_timestamp as start_time,
+                     end.common_timestamp as end_time, end.next_pid as pid,
+                    (end_time - start_time) as delta
+             from sched_waking as start
             join sched_switch as end
               on start.pid = end.next_pid) as first
-      join sched_switch as next
-        on first.pid = next.prev_pid

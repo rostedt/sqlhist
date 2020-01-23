@@ -105,6 +105,8 @@ static struct sql_table *curr_table;
 static struct sql_table *top_table;
 static struct table_map *table_list;
 
+static struct tep_handle *tep;
+
 static int no_table(void)
 {
 	static int once;
@@ -644,6 +646,77 @@ static char * make_dynamic_arg(void)
 	return store_printf("__arg%d__", arg_cnt++);
 }
 
+static struct tep_event *find_event(struct tep_handle *tep, const char *name)
+{
+	static struct tep_event stub_event = {
+		.system			= "(system)",
+	};
+
+	if (tep)
+		return tep_find_event_by_name(tep, NULL, name);
+
+	return &stub_event;
+}
+
+static struct tep_format_field *find_field(struct tep_event *event, char *name)
+{
+	static struct tep_format_field stub_field = {
+		.type = "(unknown)",
+	};
+
+	if (tep)
+		return tep_find_any_field(event, name);
+
+	return &stub_field;
+}
+
+static void print_type(struct expression *e)
+{
+	struct tep_format_field *field;
+	struct tep_event *event;
+	char *name;
+	char *tok;
+
+	while (e && e->type != EXPR_FIELD) {
+		e = e->A;
+	}
+
+	if (!e) {
+		printf(" (unknown-expression) ");
+		return;
+	}
+
+	name = strdup(show_raw_expr(e));
+
+	tok = strtok(name, ".");
+
+	event = find_event(tep, tok);
+	if (!event) {
+		tok = strtok(NULL, ".");
+		if (!tok)
+			goto out;
+		event = find_event(tep, tok);
+	}
+
+	tok = strtok(NULL, ".");
+	if (!tok || !event)
+		goto out;
+
+	if (strcmp(tok, "common_timestamp") == 0) {
+		printf(" u64 ");
+	} else {
+		field = find_field(event, tok);
+		if (field)
+			printf(" %s ", field->type);
+		else
+			printf(" (no-field-%s-for-%s) ", tok, name);
+	}
+ out:
+	if (!event)
+		printf(" (no-event-for:%s) ", name);
+	free(name);
+}
+
 static void print_synthetic_field(struct sql_table *table, struct selection *selection)
 {
 	struct expression *e = selection->item;
@@ -653,7 +726,7 @@ static void print_synthetic_field(struct sql_table *table, struct selection *sel
 	const char *to;
 	int len;
 
-	printf(" (type) ");
+	print_type(e);
 
 	name = selection->name;
 	if (!name)
@@ -1003,6 +1076,31 @@ static void print_trace(struct sql_table *table)
 	printf(")");
 }
 
+static void print_system_event(const char *text, char delim)
+{
+	struct tep_event *event;
+	char *name = strdup(text);
+	char *tok;
+
+	strtok(name, ".");
+	tok = strtok(NULL, ".");
+	if (tok) {
+		printf("%s%c%s", tok, delim, name);
+		goto out;
+	}
+
+	event = find_event(tep, name);
+	if (!event) {
+		printf("(system)%c%s", delim, name);
+		goto out;
+	}
+
+	printf("%s%c%s", event->system, delim, name);
+
+ out:
+	free(name);
+}
+
 static void make_histograms(struct sql_table *table)
 {
 	struct sql_table *save_curr = curr_table;
@@ -1024,7 +1122,9 @@ static void make_histograms(struct sql_table *table)
 	printf("echo 'hist:keys=");
 	print_keys(table, from);
 	print_values(table, from, VALUE_FROM, &vars);
-	printf("' > events/(system)/%s/trigger\n", from);
+	printf("' > events/");
+	print_system_event(from, '/');
+	printf("/trigger\n");
 
 	if (!table->to)
 		goto out;
@@ -1033,10 +1133,14 @@ static void make_histograms(struct sql_table *table)
 	to = resolve(table, table->to);
 	print_keys(table, to);
 	print_values(table, to, VALUE_TO, &vars);
-	printf(":onmatch(%s)", from);
+	printf(":onmatch(");
+	print_system_event(from, '.');
+	printf(")");
 
 	print_trace(table); 
-	printf("' > events/(system)/%s/trigger\n", to);
+	printf("' > events/");
+	print_system_event(to, '/');
+	printf("/trigger\n");
 
 	while (vars) {
 		struct var_list *v = vars;
@@ -1093,18 +1197,30 @@ int my_yyinput(char *buf, int max)
 
 int main (int argc, char **argv)
 {
+	char *trace_dir = NULL;
 	char buf[BUFSIZ];
 	FILE *fp;
 	size_t r;
+	int c;
 
-	if (argc < 1)
-		usage(argv);
+	for (;;) {
+		c = getopt(argc, argv, "hlt:");
+		if (c == -1)
+			break;
 
-	if (argc > 1) {
-		if (!strcmp(argv[1],"l"))
+		switch(c) {
+		case 'h':
+			usage(argv);
+		case 'l':
 			return lex_it();
+		case 't':
+			trace_dir = optarg;
+			break;
+		}
+	}
+	if (argc - optind > 0) {
 
-		fp = fopen(argv[1], "r");
+		fp = fopen(argv[optind], "r");
 		while ((r = fread(buf, 1, BUFSIZ, fp)) > 0) {
 			buffer = realloc(buffer, buffer_size + r + 1);
 			strncpy(buffer + buffer_size, buf, r);
@@ -1116,6 +1232,10 @@ int main (int argc, char **argv)
 	}
 
 	parse_it();
+
+	tep = tracefs_local_events(trace_dir);
+	if (!tep)
+		perror("failed to read local events ");
 
 	printf("\n");
 	make_synthetic_events(top_table);
