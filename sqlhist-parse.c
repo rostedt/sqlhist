@@ -1124,6 +1124,9 @@ static void make_histograms(struct sql_table *table)
 	printf("echo 'hist:keys=");
 	print_keys(table, from);
 	print_values(table, from, VALUE_FROM, &vars);
+
+	if (!table->to)
+		from = resolve(table, table->from);
 	printf("' > events/");
 	print_system_event(from, '/');
 	printf("/trigger\n");
