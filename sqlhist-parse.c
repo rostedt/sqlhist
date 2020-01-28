@@ -979,15 +979,13 @@ static void print_value(struct sql_table *table,
 
 	switch (e->type) {
 	case EXPR_FIELD:
-		if (!selection->name)
+		if (!selection->name || !e->name || type == VALUE_TO)
 			break;
 		actual = show_raw_expr(e);
 		field = event_match(event, actual, len);
 		if (field) {
 			print_val_delim(start);
-			if (e->name)
-				printf("%s=", e->name);
-			printf("%s", field);
+			printf("%s=%s", e->name, field);
 			add_var(vars, e->name, actual);
 		}
 		break;
@@ -1046,14 +1044,6 @@ static void print_trace_field(struct sql_table *table, struct selection *selecti
 	const char *to;
 	int len;
 
-	name = selection->name;
-	if (!name)
-		name = e->name;
-	if (name) {
-		printf(",$%s", name);
-		return;
-	}
-
 	to = resolve(table, table->to);
 	len = strlen(to);
 
@@ -1061,6 +1051,14 @@ static void print_trace_field(struct sql_table *table, struct selection *selecti
 	field = event_match(to, actual, len);
 	if (field) {
 		printf(",%s", field);
+		return;
+	}
+
+	name = selection->name;
+	if (!name)
+		name = e->name;
+	if (name) {
+		printf(",$%s", name);
 		return;
 	}
 
