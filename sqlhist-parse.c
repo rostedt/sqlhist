@@ -979,14 +979,28 @@ static void print_value(struct sql_table *table,
 
 	switch (e->type) {
 	case EXPR_FIELD:
-		if (!selection->name || !e->name || type == VALUE_TO)
+		if (!selection->name || !e->name)
 			break;
 		actual = show_raw_expr(e);
 		field = event_match(event, actual, len);
 		if (field) {
+			if (type != VALUE_TO) {
+				print_val_delim(start);
+				printf("%s=%s", e->name, field);
+				add_var(vars, e->name, actual);
+			}
+		} else if (type == VALUE_TO) {
+			const char *arg;
+			/*
+			 * The selection wants to show the from,
+			 * We need to save the from field in a variable
+			 */
 			print_val_delim(start);
-			printf("%s=%s", e->name, field);
-			add_var(vars, e->name, actual);
+			arg = make_dynamic_arg();
+			printf("%s=$%s", arg, e->name);
+			add_var(vars, arg, actual);
+			/* Now use the this arg for the parameters */
+			selection->name = arg;
 		}
 		break;
 	default:
