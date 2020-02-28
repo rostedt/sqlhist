@@ -521,7 +521,11 @@ static void usage(char **argv)
 		p--;
 	p++;
 
-	printf("usage: %s events\n"
+	printf("\nusage: %s [-hl][-t tracefs-path][file]\n"
+	       " file : holds sql statement (read from stdin if not present)\n"
+	       " -h : show this message\n"
+	       " -l : Only run the lexer (for testing)\n"
+	       " -t : Path to tracefs directory (looks for it via /proc/mounts if not set)\n"
 	       "\n",p);
 	exit(-1);
 }
