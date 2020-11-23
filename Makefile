@@ -12,18 +12,28 @@ ifneq ($(strip $(LIBTRACEFS_AVAILABLE)), y)
 NO_TRACEFS := 1
 endif
 
-ifndef NO_TRACEFS
-LIBS := $(LD_PATH) -ltracefs -ltraceevent -DHAVE_TRACEFS
-target += report_tracefs
+PKG_CONFIG = pkg-config
+TRACEFS_INCLUDES = $(shell $(PKG_CONFIG) --cflags libtracefs)
+TRACEFS_LIBS = $(shell $(PKG_CONFIG) --libs libtracefs)
+
+TRACEEVENT_INCLUDES = $(shell $(PKG_CONFIG) --cflags libtraceevent)
+TRACEEVENT_LIBS = $(shell $(PKG_CONFIG) --libs libtraceevent)
+
+ifeq ($(TRACEFS_INCLUDES),'')
+TARGETS += report_notracefs
 else
-LIBS :=
-target += report_notracefs
+TRACEFS_INCLUDES += -DHAVE_TRACEFS
+TARGETS += report_tracefs
 endif
+
+LIBS = $(TRACEFS_LIBS) $(TRACEEVENT_LIBS) -ldl
+
+CFLAGS := $(TRACEFS_INCLUDES) $(TRACEEVENT_INCLUDES)
 
 all: $(TARGETS)
 
 sqlhist: sqlhist-parse.c sqlhist.tab.c lex.yy.c
-	gcc -g -Wall -o $@ $^ $(LIBS)
+	gcc -g -Wall -o $@ $(CFLAGS) $^ $(LIBS)
 
 lex.yy.c: sqlhist.l
 	flex $^
