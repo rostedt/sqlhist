@@ -1242,6 +1242,8 @@ int main (int argc, char **argv)
 	if (argc - optind > 0) {
 
 		fp = fopen(argv[optind], "r");
+		if (!fp)
+			pdie("Error opening: %s", argv[optind]);
 		while ((r = fread(buf, 1, BUFSIZ, fp)) > 0) {
 			buffer = realloc(buffer, buffer_size + r + 1);
 			strncpy(buffer + buffer_size, buf, r);
