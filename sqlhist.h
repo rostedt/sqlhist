@@ -9,6 +9,8 @@
 
 #include "sqlhist.tab.h"
 
+#include "sqlhist-defs.h"
+
 char * store_str(const char *str);
 char * store_printf(const char *fmt, ...);
 void add_label(const char *label, const char *val);
@@ -30,5 +32,9 @@ void add_expr(const char *name, void *expr);
 void add_selection(void *item);
 void add_from(void *item);
 void add_to(void *item);
+
+extern struct sql_table *curr_table;
+extern struct sql_table *top_table;
+extern struct table_map *table_list;
 
 #endif
