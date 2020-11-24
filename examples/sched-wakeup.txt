@@ -1,0 +1,1 @@
+(select start.pid, (end.common_timestamp.usecs - start.common_timestamp.usecs) as lat from sched_wakeup as start join sched_switch as end on start.pid = end.next_pid) as sched_lat
