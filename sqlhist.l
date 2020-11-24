@@ -25,10 +25,17 @@ as { return AS; }
 from { return FROM; }
 join { return JOIN; }
 on { return ON; }
+where { return WHERE; }
 
 \$[a-z][a-z0-9_]* { yylval.string = store_str(yytext); return VARIABLE; }
 
 [a-z0-9_\.]+ {  yylval.string = store_str(yytext); return STRING; }
+
+\!= { return NEQ; }
+\<= { return LE; }
+\>= { return GE; }
+== { return EQ; }
+[<>&~] { return yytext[0]; }
 
 [()\-\+\*/,=] { return yytext[0]; }
 

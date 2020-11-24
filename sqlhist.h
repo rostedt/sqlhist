@@ -26,8 +26,10 @@ void *add_minus(void *A, void *B);
 void *add_mult(void *A, void *B);
 void *add_divid(void *A, void *B);
 void *add_field(const char *field, const char *label);
+void *add_filter(void *A, void *B, const char *op);
 
 void add_expr(const char *name, void *expr);
+void add_where(void *expr);
 
 void add_selection(void *item);
 void add_from(void *item);

@@ -31,6 +31,7 @@ enum expr_type {
 	EXPR_MINUS,
 	EXPR_MULT,
 	EXPR_DIVID,
+	EXPR_FILTER,
 };
 
 struct sql_table;
@@ -39,6 +40,7 @@ struct expression {
 	enum expr_type		type;
 	void			*A;
 	void			*B;
+	const char		*op;
 	const char		*name;
 	struct sql_table	*table;
 };
@@ -60,6 +62,7 @@ struct sql_table {
 	struct selection	**next_selection;
 	const char		*from;
 	const char		*to;
+	struct expression	*filter;
 };
 
 #endif

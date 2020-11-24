@@ -151,7 +151,7 @@ static const char *expand(const char *str)
 	return ret;
 }
 
-static char *expr_op_connect(void *A, void *B, char *op,
+static char *expr_op_connect(void *A, void *B, const char *op,
 			     const char *(*show)(void *A))
 {
 	struct expression *eA = A;
@@ -211,6 +211,9 @@ const char *__show_expr(struct expression *e, bool eval)
 		break;
 	case EXPR_DIVID:
 		ret = expr_op_connect(e->A, e->B, "/", show);
+		break;
+	case EXPR_FILTER:
+		ret = expr_op_connect(e->A, e->B, e->op, show);
 		break;
 	}
 	return ret;
@@ -699,6 +702,42 @@ static void print_trace(struct sql_table *table)
 	printf(")");
 }
 
+static void print_compare(struct sql_table *table, const char *event)
+{
+	struct expression *filter = table->filter;
+	struct expression *A, *B;
+	const char *op;
+	const char *actual;
+	const char *field;
+	int len;
+
+	if (filter->type != EXPR_FILTER) {
+		printf("<NOT A FILTER>");
+		return;
+	}
+
+	A = filter->A;
+	B = filter->B;
+	op = filter->op;
+
+	len = strlen(event);
+
+	actual = show_raw_expr(A);
+	field = event_match(event, actual, len);
+	if (!field)
+		return;
+
+	printf(" if %s %s %s", field, op, show_expr(B));
+}
+
+static void print_filter(struct sql_table *table, const char *event)
+{
+	if (!table->filter || !event)
+		return;
+
+	print_compare(table, event);
+}
+
 static void print_system_event(const char *text, char delim)
 {
 	struct tep_event *event;
@@ -745,6 +784,7 @@ static void make_histograms(struct sql_table *table)
 	printf("echo 'hist:keys=");
 	print_keys(table, from);
 	print_values(table, from, VALUE_FROM, &vars);
+	print_filter(table, from);
 
 	if (!table->to)
 		from = resolve(table, table->from);
@@ -763,7 +803,8 @@ static void make_histograms(struct sql_table *table)
 	print_system_event(from, '.');
 	printf(")");
 
-	print_trace(table); 
+	print_trace(table);
+	print_filter(table, to);
 	printf("' > events/");
 	print_system_event(to, '/');
 	printf("/trigger\n");

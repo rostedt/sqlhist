@@ -20,14 +20,16 @@ extern void yyerror(char *fmt, ...);
 
 %token AS SELECT FROM JOIN ON WHERE
 %token <string> STRING VARIABLE
+%token <string> LE GE EQ NEQ TILDA
 
 %left '+' '-'
 %left '*' '/'
+%left '<' '>'
 
 %type <string> name field label
 %type <string> selection_list table_exp selection_item
 %type <string> from_clause select_statement event_map
-%type <string> where_clause
+%type <string> where_clause compare
 
 %type <expr>  selection_expr item named_field join_clause
 
@@ -122,8 +124,23 @@ event_map :
    from_clause join_clause on_clause { $$ = store_printf("%s TO %s", $1, show_expr($2)); }
  ;
 
+compare :
+   item '<' item	{ $$ = add_filter($1, $3, "<"); }
+ | item '>' item	{ $$ = add_filter($1, $3, ">"); }
+ | item LE item		{ $$ = add_filter($1, $3, "<="); }
+ | item GE item		{ $$ = add_filter($1, $3, ">="); }
+ | item '=' item	{ $$ = add_filter($1, $3, "=="); }
+ | item EQ item		{ $$ = add_filter($1, $3, "=="); }
+ | item NEQ item	{ $$ = add_filter($1, $3, "!="); }
+ | item '&' item	{ $$ = add_filter($1, $3, "&"); }
+ | item '~' item	{ $$ = add_filter($1, $3, "~"); }
+;
+
 where_clause :
-   WHERE item { $$ = store_printf(" WHERE %s", show_expr($2)); }
+   WHERE compare {
+	   $$ = store_printf(" WHERE %s", show_expr($2));
+	   add_where($2);
+   }
  ;
 
 table_exp :

@@ -188,7 +188,8 @@ const char *show_expr(void *expr)
 	return __show_expr(expr, false);
 }
 
-static struct expression *create_expression(void *A, void *B, enum expr_type type)
+static struct expression *create_expression_op(void *A, void *B, const char *op,
+					       enum expr_type type)
 {
 	struct expression *e;
 
@@ -197,10 +198,16 @@ static struct expression *create_expression(void *A, void *B, enum expr_type typ
 		die("malloc");
 	e->A = A;
 	e->B = B;
+	e->op = op;
 	e->type = type;
 	e->table = curr_table;
 
 	return e;
+}
+
+static struct expression *create_expression(void *A, void *B, enum expr_type type)
+{
+	return create_expression_op(A, B, NULL, type);
 }
 
 void *add_plus(void *A, void *B)
@@ -240,6 +247,22 @@ void *add_field(const char *field, const char *label)
 		add_expr(label, e);
 
 	return e;
+}
+
+void *add_filter(void *A, void *B, const char *op)
+{
+	return create_expression_op(A, B, op, EXPR_FILTER);
+}
+
+void add_where(void *A)
+{
+	struct expression *e = A;
+
+	if (curr_table->filter) {
+		printf("more than one filter!\n");
+		return;
+	}
+	curr_table->filter = e;
 }
 
 static inline unsigned int quick_hash(const char *str)
