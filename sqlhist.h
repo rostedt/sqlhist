@@ -13,12 +13,12 @@
 
 char * store_str(const char *str);
 char * store_printf(const char *fmt, ...);
-void add_label(const char *label, const char *val);
-void add_match(const char *A, const char *B);
-void table_start(void);
-void table_end(const char *name);
-void from_table_end(const char *name);
-void simple_table_end(void);
+int add_label(const char *label, const char *val);
+int add_match(const char *A, const char *B);
+int table_start(void);
+int table_end(const char *name);
+int from_table_end(const char *name);
+int simple_table_end(void);
 
 const char *show_expr(void *expr);
 void *add_plus(void *A, void *B);
@@ -28,10 +28,10 @@ void *add_divid(void *A, void *B);
 void *add_field(const char *field, const char *label);
 void *add_filter(void *A, void *B, const char *op);
 
-void add_expr(const char *name, void *expr);
+int add_expr(const char *name, void *expr);
 void add_where(void *expr);
 
-void add_selection(void *item);
+int add_selection(void *item);
 void add_from(void *item);
 void add_to(void *item);
 

@@ -10,8 +10,6 @@
 #include "sqlhist.h"
 #include "sqlhist-local.h"
 
-void die(const char *fmt, ...);
-
 struct sql_table *curr_table;
 struct sql_table *top_table;
 struct table_map *table_list;
@@ -36,13 +34,13 @@ static int no_table(void)
 	return 1;
 }
 
-void table_start(void)
+int table_start(void)
 {
 	struct sql_table *table;;
 
 	table = calloc(1, sizeof(*table));
 	if (!table)
-		die("malloc");
+		return -ENOMEM;
 
 	table->next_selection = &table->selections;
 
@@ -53,6 +51,8 @@ void table_start(void)
 		top_table = table;
 
 	curr_table = table;
+
+	return 0;
 }
 
 void add_from(void *item)
@@ -65,55 +65,72 @@ void add_to(void *item)
 	curr_table->to = show_expr(item);
 }
 
-static void add_table(const char *label)
+static int add_table(const char *label)
 {
 	struct table_map *tmap;
 
 	if (no_table())
-		return;
+		return 0;
 
 	tmap = malloc(sizeof(*tmap));
 	if (!tmap)
-		die("malloc");
+		return -ENOMEM;
 
 	tmap->table = curr_table;
 	tmap->name = store_str(label);
+	if (!tmap->name) {
+		free(tmap);
+		return -ENOMEM;
+	}
 
 	tmap->next = table_list;
 	table_list = tmap;
+
+	return 0;
 }
 
-void table_end(const char *name)
+int table_end(const char *name)
 {
 	static int anony_cnt;
 	char *tname;
+	int ret;
 
 	if (!name)
 		tname = store_printf("Anonymous%d", anony_cnt++);
 	else
 		tname = store_str(name);
 
-	add_table(tname);
+	if (!tname)
+		return -ENOMEM;
+
+	ret = add_table(tname);
+	if (ret)
+		return ret;
 
 	curr_table->name = tname;
 	curr_table = curr_table->parent;
+
+	return 0;
 }
 
-void from_table_end(const char *name)
+int from_table_end(const char *name)
 {
-	if (curr_table->parent)
+	if (curr_table->parent) {
 		curr_table->parent->from = store_str(name);
+		if (!curr_table->parent->from)
+			return -ENOMEM;
+	}
 
-	table_end(name);
+	return table_end(name);
 }
 
 /* Just a histogram table */
-void simple_table_end(void)
+int simple_table_end(void)
 {
-
+	return 0;
 }
 
-static void insert_label(const char *label, void *val, enum label_type type)
+static int insert_label(const char *label, void *val, enum label_type type)
 {
 	struct label_map *lmap;
 	struct sql_table *table = curr_table;
@@ -123,59 +140,73 @@ static void insert_label(const char *label, void *val, enum label_type type)
 
 	if (!table) {
 		no_table();
-		return;
+		return 0;
 	}
 
 	lmap = malloc(sizeof(*lmap));
 	if (!lmap)
-		die("malloc");
+		return -ENOMEM;
 	lmap->label = store_str(label);
+	if (!lmap->label) {
+		free(lmap);
+		return -ENOMEM;
+	}
 	lmap->value = val;
 	lmap->type = type;
 
 	lmap->next = table->labels;
 	table->labels = lmap;
+	return 0;
 }
 
-void add_label(const char *label, const char *val)
+int add_label(const char *label, const char *val)
 {
-	insert_label(label, store_str(val), LABEL_STRING);
+	return insert_label(label, store_str(val), LABEL_STRING);
 }
 
-void add_match(const char *A, const char *B)
+int add_match(const char *A, const char *B)
 {
 	struct match_map *map;
 
 	if (no_table())
-		return;
+		return 0;
 
 	map = malloc(sizeof(*map));
 	if (!map)
-		die("malloc");
+		return -ENOMEM;
 	map->A = store_str(A);
 	map->B = store_str(B);
 
+	if (!map->A || !map->B) {
+		free(map);
+		return -ENOMEM;
+	}
+
 	map->next = curr_table->matches;
 	curr_table->matches = map;
+
+	return 0;
 }
 
-void add_selection(void *item)
+int add_selection(void *item)
 {
 	struct selection *selection;
 	struct expression *e = item;
 
 	if (no_table())
-		return;
+		return 0;
 
 	selection = malloc(sizeof(*selection));
 	if (!selection)
-		die("malloc");
+		return -ENOMEM;
 
 	selection->item = e;
 	selection->name = e->name;
 	selection->next = NULL;
 	*curr_table->next_selection = selection;
 	curr_table->next_selection = &selection->next;
+
+	return 0;
 }
 
 const char *show_expr(void *expr)
@@ -195,7 +226,7 @@ static struct expression *create_expression_op(void *A, void *B, const char *op,
 
 	e = calloc(sizeof(*e), 1);
 	if (!e)
-		die("malloc");
+		return NULL;
 	e->A = A;
 	e->B = B;
 	e->op = op;
@@ -230,12 +261,16 @@ void *add_divid(void *A, void *B)
 	return create_expression(A, B, EXPR_DIVID);
 }
 
-void add_expr(const char *label, void *A)
+int add_expr(const char *label, void *A)
 {
 	struct expression *e = A;
 
+	if (!e)
+		return 0;
+
 	insert_label(label, A, LABEL_EXPR);
 	e->name = store_str(label);
+	return e->name ? 0 : -ENOMEM;
 }
 
 void *add_field(const char *field, const char *label)

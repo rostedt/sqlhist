@@ -163,19 +163,19 @@ static char *expr_op_connect(void *A, void *B, const char *op,
 	if (eA->name) {
 		r = asprintf(&a, "%s AS %s", show(A), eA->name);
 		if (r < 0)
-			die("asprintf");
+			return NULL;
 	}
 
 	if (eB->name) {
 		r = asprintf(&b, "%s AS %s", show(B), eB->name);
 		if (r < 0)
-			die("asprintf");
+			return NULL;
 	}
 
 	r = asprintf(&str, "(%s %s %s)",
 		     a ? a : show(A), op, b ? b : show(B));
 	if (r < 0)
-		die("asprintf");
+		return NULL;
 	free(a);
 	free(b);
 
@@ -516,17 +516,19 @@ static const char *find_var(struct var_list **vars, const char *val)
 	return NULL;
 }
 
-static void add_var(struct var_list **vars, const char *var, const char *val)
+static int add_var(struct var_list **vars, const char *var, const char *val)
 {
 	struct var_list *v;
 
 	v = malloc(sizeof(*v));
 	if (!v)
-		die("malloc");
+		return -ENOMEM;
 	v->var = var;
 	v->val = val;
 	v->next = *vars;
 	*vars = v;
+
+	return 0;
 }
 
 static void print_to_expr(struct sql_table *table, const char *event,
@@ -566,13 +568,14 @@ static void print_to_expr(struct sql_table *table, const char *event,
 	}
 }
 
-static void print_from_expr(struct sql_table *table, const char *event,
+static int print_from_expr(struct sql_table *table, const char *event,
 			    struct expression *e, bool *start,
 			    struct var_list **vars)
 {
 	const char *actual;
 	const char *field;
 	int len = strlen(event);
+	int ret = 0;
 
 	switch (e->type) {
 	case EXPR_FIELD:
@@ -583,7 +586,7 @@ static void print_from_expr(struct sql_table *table, const char *event,
 			if (!e->name)
 				e->name = make_dynamic_arg();
 			printf("%s=%s", e->name, field);
-			add_var(vars, e->name, actual);
+			ret = add_var(vars, e->name, actual);
 			break;
 		}
 		break;
@@ -591,9 +594,10 @@ static void print_from_expr(struct sql_table *table, const char *event,
 		print_from_expr(table, event, e->A, start, vars);
 		print_from_expr(table, event, e->B, start, vars);
 	}
+	return ret;
 }
 
-static void print_value(struct sql_table *table,
+static int print_value(struct sql_table *table,
 			const char *event, struct selection *selection,
 			enum value_type type, bool *start, struct var_list **vars)
 {
@@ -602,6 +606,7 @@ static void print_value(struct sql_table *table,
 	int len = strlen(event);
 	const char *actual;
 	const char *field;
+	int ret = 0;
 
 	switch (e->type) {
 	case EXPR_FIELD:
@@ -612,7 +617,7 @@ static void print_value(struct sql_table *table,
 		if (field && type != VALUE_TO) {
 			print_val_delim(start);
 			printf("%s=%s", e->name, field);
-			add_var(vars, e->name, actual);
+			ret = add_var(vars, e->name, actual);
 		}
 		break;
 	default:
@@ -626,15 +631,17 @@ static void print_value(struct sql_table *table,
 		break;
 	}
 
+	return ret;
 }
 
-static void print_values(struct sql_table *table, const char *event,
+static int print_values(struct sql_table *table, const char *event,
 			 enum value_type type, struct var_list **vars)
 {
 	struct selection *selection;
 	struct expression *e;
 	char *f, *p;
 	bool start = true;
+	int ret = 0;
 
 	if (event) {
 		f = strdup(event);
@@ -642,7 +649,8 @@ static void print_values(struct sql_table *table, const char *event,
 			*p = '\0';
 
 		for (selection = table->selections; selection; selection = selection->next) {
-			print_value(table, f, selection, type, &start, vars);
+			ret = print_value(table, f, selection, type,
+					  &start, vars);
 		}
 		free(f);
 	} else {
@@ -659,6 +667,7 @@ static void print_values(struct sql_table *table, const char *event,
 			printf("%s", show_raw_expr(e));
 		}
 	}
+	return ret;
 }
 
 static void print_trace_field(struct sql_table *table, struct selection *selection)
@@ -836,7 +845,8 @@ static int parse_it(void)
 	int ret;
 
 	ret = yyparse();
-
+	if (ret == -ENOMEM)
+		fprintf(stderr, "Failed to allocate memory\n");
 	dump_tables();
 
 	return ret;
