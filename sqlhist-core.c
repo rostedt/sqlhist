@@ -10,6 +10,8 @@
 #include "sqlhist.h"
 #include "sqlhist-local.h"
 
+#include <trace-seq.h>
+
 /*
  *  Ideally, we will conevert:
  *
@@ -229,61 +231,61 @@ static struct sql_table *find_table(const char *name)
 	return NULL;
 }
 
-static void dump_label_map(struct sql_table *table)
+static void dump_label_map(struct trace_seq *s, struct sql_table *table)
 {
 	struct label_map *lmap;
 	struct table_map *tmap;
 
 	if (table->labels)
-		printf("%s Labels:\n", table->name);
+		trace_seq_printf(s, "%s Labels:\n", table->name);
 	for (lmap = table->labels; lmap; lmap = lmap->next) {
 		switch (lmap->type) {
 		case LABEL_STRING:
-			printf("  %s = %s\n",
+			trace_seq_printf(s, "  %s = %s\n",
 			       lmap->label, (char *)lmap->value);
 			break;
 		case LABEL_EXPR:
-			printf("  %s = (%s)\n", lmap->label,
+			trace_seq_printf(s, "  %s = (%s)\n", lmap->label,
 			       show_raw_expr(lmap->value));
 			break;
 		}
 	}
 	if (table->tables)
-		printf("%s Tables:\n", table->name);
+		trace_seq_printf(s, "%s Tables:\n", table->name);
 	for (tmap = table->tables; tmap; tmap = tmap->next) {
-		printf("  %s = Table %s\n", tmap->name, tmap->table->name);
+		trace_seq_printf(s, "  %s = Table %s\n", tmap->name, tmap->table->name);
 	}
 }
 
-static void dump_match_map(struct sql_table *table)
+static void dump_match_map(struct trace_seq *s, struct sql_table *table)
 {
 	struct match_map *map;
 
 	if (table->matches)
-		printf("%s Matches:\n", table->name);
+		trace_seq_printf(s, "%s Matches:\n", table->name);
 	for (map = table->matches; map; map = map->next) {
-		printf("  %s = %s\n", map->A, map->B);
+		trace_seq_printf(s, "  %s = %s\n", map->A, map->B);
 	}
 }
 
-static void dump_table(struct sql_table *table)
+static void dump_table(struct trace_seq *s, struct sql_table *table)
 {
 	struct sql_table *save_curr = curr_table;
 
 	if (!table)
 		return;
 
-	dump_table(find_table(table->from));
+	dump_table(s, find_table(table->from));
 
 	curr_table = table;
 
-	printf("\nTable: %s\n", table->name);
-	dump_label_map(table);
-	dump_match_map(table);
+	trace_seq_printf(s, "\nTable: %s\n", table->name);
+	dump_label_map(s, table);
+	dump_match_map(s, table);
 
 	curr_table = save_curr;
 
-	dump_table(find_table(table->to));
+	dump_table(s, find_table(table->to));
 }
 
 static const char *event_match(const char *event, const char *val, int len)
@@ -325,7 +327,7 @@ static struct tep_format_field *find_field(struct tep_event *event, char *name)
 	return &stub_field;
 }
 
-static void print_type(struct expression *e)
+static void print_type(struct trace_seq *s, struct expression *e)
 {
 	struct tep_format_field *field;
 	struct tep_event *event;
@@ -337,7 +339,7 @@ static void print_type(struct expression *e)
 	}
 
 	if (!e) {
-		printf(" (unknown-expression) ");
+		trace_seq_printf(s, " (unknown-expression) ");
 		return;
 	}
 
@@ -358,21 +360,23 @@ static void print_type(struct expression *e)
 		goto out;
 
 	if (strcmp(tok, "common_timestamp") == 0) {
-		printf(" u64 ");
+		trace_seq_printf(s, " u64 ");
 	} else {
 		field = find_field(event, tok);
 		if (field)
-			printf(" %s ", field->type);
+			trace_seq_printf(s, " %s ", field->type);
 		else
-			printf(" (no-field-%s-for-%s) ", tok, name);
+			trace_seq_printf(s, " (no-field-%s-for-%s) ", tok, name);
 	}
  out:
 	if (!event)
-		printf(" (no-event-for:%s) ", name);
+		trace_seq_printf(s, " (no-event-for:%s) ", name);
 	free(name);
 }
 
-static void print_synthetic_field(struct sql_table *table, struct selection *selection)
+static void print_synthetic_field(struct trace_seq *s,
+				  struct sql_table *table,
+				  struct selection *selection)
 {
 	struct expression *e = selection->item;
 	const char *name;
@@ -381,13 +385,13 @@ static void print_synthetic_field(struct sql_table *table, struct selection *sel
 	const char *to;
 	int len;
 
-	print_type(e);
+	print_type(s, e);
 
 	name = selection->name;
 	if (!name)
 		name = e->name;
 	if (name) {
-		printf("%s", name);
+		trace_seq_printf(s, "%s", name);
 		return;
 	}
 
@@ -397,7 +401,7 @@ static void print_synthetic_field(struct sql_table *table, struct selection *sel
 	actual = show_raw_expr(e);
 	field = event_match(to, actual, len);
 	if (field) {
-		printf("%s", field);
+		trace_seq_printf(s, "%s", field);
 		return;
 	}
 
@@ -407,13 +411,13 @@ static void print_synthetic_field(struct sql_table *table, struct selection *sel
 	field = strstr(actual, ".");
 	if (field) {
 		/* Need to check for common_timestamp */
-		printf("%s", field + 1);
+		trace_seq_printf(s, "%s", field + 1);
 	} else {
-		printf("%s", e->name);
+		trace_seq_printf(s, "%s", e->name);
 	}
 }
 
-static void make_synthetic_events(struct sql_table *table)
+static void make_synthetic_events(struct trace_seq *s, struct sql_table *table)
 {
 	struct selection *selection;
 	struct sql_table *save_curr = curr_table;
@@ -421,22 +425,23 @@ static void make_synthetic_events(struct sql_table *table)
 	if (!table || !table->to)
 		return;
 
-	make_synthetic_events(find_table(table->from));
+	make_synthetic_events(s, find_table(table->from));
 
 	curr_table = table;
 
-	printf("echo '%s", table->name);
+	trace_seq_printf(s, "echo '%s", table->name);
 	for (selection = table->selections; selection; selection = selection->next)
-		print_synthetic_field(table, selection);
+		print_synthetic_field(s, table, selection);
 
-	printf("' > synthetic_events\n");
+	trace_seq_printf(s, "' > synthetic_events\n");
 
 	curr_table = save_curr;
 
-	make_synthetic_events(find_table(table->to));
+	make_synthetic_events(s, find_table(table->to));
 }
 
-static void print_key(struct sql_table *table,
+static void print_key(struct trace_seq *s,
+		      struct sql_table *table,
 		      const char *event,
 		      const char *key1, const char *key2)
 {
@@ -445,14 +450,14 @@ static void print_key(struct sql_table *table,
 
 	field = event_match(event, key1, len);
 	if (field) 
-		printf("%s", field);
+		trace_seq_printf(s, "%s", field);
 
 	field = event_match(event, key2, len);
 	if (field)
-		printf("%s", field);
+		trace_seq_printf(s, "%s", field);
 }
 
-static void print_keys(struct sql_table *table, const char *event)
+static void print_keys(struct trace_seq *s, struct sql_table *table, const char *event)
 {
 	struct selection *selection;
 	struct match_map *map;
@@ -467,8 +472,8 @@ static void print_keys(struct sql_table *table, const char *event)
 
 		for (map = table->matches; map; map = map->next) {
 			if (start++)
-				printf(",");
-			print_key(table, f, expand(map->A), expand(map->B));
+				trace_seq_printf(s, ",");
+			print_key(s, table, f, expand(map->A), expand(map->B));
 		}
 
 		free(f);
@@ -478,8 +483,8 @@ static void print_keys(struct sql_table *table, const char *event)
 			if (!e->name || strncmp(e->name, "key", 3) != 0)
 				continue;
 			if (start++)
-				printf(",");
-			printf("%s", show_raw_expr(e));
+				trace_seq_printf(s, ",");
+			trace_seq_printf(s, "%s", show_raw_expr(e));
 		}
 	}
 }
@@ -489,13 +494,13 @@ enum value_type {
 	VALUE_FROM,
 };
 
-static void print_val_delim(bool *start)
+static void print_val_delim(struct trace_seq *s, bool *start)
 {
 	if (*start) {
-		printf(":");
+		trace_seq_printf(s, ":");
 		*start = false;
 	} else
-		printf(",");
+		trace_seq_printf(s, ",");
 }
 
 struct var_list {
@@ -531,7 +536,8 @@ static int add_var(struct var_list **vars, const char *var, const char *val)
 	return 0;
 }
 
-static void print_to_expr(struct sql_table *table, const char *event,
+static void print_to_expr(struct trace_seq *s,
+			  struct sql_table *table, const char *event,
 			  struct expression *e,
 			  struct var_list **vars)
 {
@@ -544,31 +550,32 @@ static void print_to_expr(struct sql_table *table, const char *event,
 		actual = show_raw_expr(e);
 		field = event_match(event, actual, len);
 		if (field) {
-			printf("%s", field);
+			trace_seq_printf(s, "%s", field);
 			break;
 		}
 
 		field = strstr(actual, ".");
 		if (!field) {
-			printf("%s", field);
+			trace_seq_printf(s, "%s", field);
 			break;
 		}
-		printf("$%s", find_var(vars, actual));
+		trace_seq_printf(s, "$%s", find_var(vars, actual));
 		break;
 	default:
-		print_to_expr(table, event, e->A, vars);
+		print_to_expr(s, table, event, e->A, vars);
 		switch (e->type) {
-		case EXPR_PLUS:		printf("+");	break;
-		case EXPR_MINUS:	printf("-");	break;
-		case EXPR_MULT:		printf("*");	break;
-		case EXPR_DIVID:	printf("/");	break;
+		case EXPR_PLUS:		trace_seq_printf(s, "+");	break;
+		case EXPR_MINUS:	trace_seq_printf(s, "-");	break;
+		case EXPR_MULT:		trace_seq_printf(s,"*");	break;
+		case EXPR_DIVID:	trace_seq_printf(s, "/");	break;
 		default: break;
 		}
-		print_to_expr(table, event, e->B, vars);
+		print_to_expr(s, table, event, e->B, vars);
 	}
 }
 
-static int print_from_expr(struct sql_table *table, const char *event,
+static int print_from_expr(struct trace_seq *s,
+			   struct sql_table *table, const char *event,
 			    struct expression *e, bool *start,
 			    struct var_list **vars)
 {
@@ -582,22 +589,23 @@ static int print_from_expr(struct sql_table *table, const char *event,
 		actual = show_raw_expr(e);
 		field = event_match(event, actual, len);
 		if (field && !find_var(vars, actual)) {
-			print_val_delim(start);
+			print_val_delim(s, start);
 			if (!e->name)
 				e->name = make_dynamic_arg();
-			printf("%s=%s", e->name, field);
+			trace_seq_printf(s, "%s=%s", e->name, field);
 			ret = add_var(vars, e->name, actual);
 			break;
 		}
 		break;
 	default:
-		print_from_expr(table, event, e->A, start, vars);
-		print_from_expr(table, event, e->B, start, vars);
+		print_from_expr(s, table, event, e->A, start, vars);
+		print_from_expr(s, table, event, e->B, start, vars);
 	}
 	return ret;
 }
 
-static int print_value(struct sql_table *table,
+static int print_value(struct trace_seq *s,
+		       struct sql_table *table,
 			const char *event, struct selection *selection,
 			enum value_type type, bool *start, struct var_list **vars)
 {
@@ -615,18 +623,18 @@ static int print_value(struct sql_table *table,
 		actual = show_raw_expr(e);
 		field = event_match(event, actual, len);
 		if (field && type != VALUE_TO) {
-			print_val_delim(start);
-			printf("%s=%s", e->name, field);
+			print_val_delim(s, start);
+			trace_seq_printf(s, "%s=%s", e->name, field);
 			ret = add_var(vars, e->name, actual);
 		}
 		break;
 	default:
 		if (type == VALUE_TO) {
-			print_val_delim(start);
-			printf("%s=", name);
-			print_to_expr(table, event, e, vars);
+			print_val_delim(s, start);
+			trace_seq_printf(s, "%s=", name);
+			print_to_expr(s, table, event, e, vars);
 		} else {
-			print_from_expr(table, event, e, start, vars);
+			print_from_expr(s, table, event, e, start, vars);
 		}
 		break;
 	}
@@ -634,7 +642,8 @@ static int print_value(struct sql_table *table,
 	return ret;
 }
 
-static int print_values(struct sql_table *table, const char *event,
+static int print_values(struct trace_seq *s,
+			struct sql_table *table, const char *event,
 			 enum value_type type, struct var_list **vars)
 {
 	struct selection *selection;
@@ -649,7 +658,7 @@ static int print_values(struct sql_table *table, const char *event,
 			*p = '\0';
 
 		for (selection = table->selections; selection; selection = selection->next) {
-			ret = print_value(table, f, selection, type,
+			ret = print_value(s, table, f, selection, type,
 					  &start, vars);
 		}
 		free(f);
@@ -659,18 +668,19 @@ static int print_values(struct sql_table *table, const char *event,
 			if (e->name && strncmp(e->name, "key", 3) == 0)
 				continue;
 			if (start) {
-				printf(":values=");
+				trace_seq_printf(s, ":values=");
 				start = false;
 			} else {
-				printf(",");
+				trace_seq_printf(s, ",");
 			}
-			printf("%s", show_raw_expr(e));
+			trace_seq_printf(s, "%s", show_raw_expr(e));
 		}
 	}
 	return ret;
 }
 
-static void print_trace_field(struct sql_table *table, struct selection *selection)
+static void print_trace_field(struct trace_seq *s,
+			      struct sql_table *table, struct selection *selection)
 {
 	struct expression *e = selection->item;
 	const char *name;
@@ -685,7 +695,7 @@ static void print_trace_field(struct sql_table *table, struct selection *selecti
 	actual = show_raw_expr(e);
 	field = event_match(to, actual, len);
 	if (field) {
-		printf(",%s", field);
+		trace_seq_printf(s, ",%s", field);
 		return;
 	}
 
@@ -693,25 +703,26 @@ static void print_trace_field(struct sql_table *table, struct selection *selecti
 	if (!name)
 		name = e->name;
 	if (name) {
-		printf(",$%s", name);
+		trace_seq_printf(s, ",$%s", name);
 		return;
 	}
 
-	printf(",ERROR");
+	trace_seq_printf(s, ",ERROR");
 }
 
-static void print_trace(struct sql_table *table)
+static void print_trace(struct trace_seq *s, struct sql_table *table)
 {
 	struct selection *selection;
 
-	printf(".trace(%s", table->name);
+	trace_seq_printf(s, ".trace(%s", table->name);
 
 	for (selection = table->selections; selection; selection = selection->next)
-		print_trace_field(table, selection);
-	printf(")");
+		print_trace_field(s, table, selection);
+	trace_seq_printf(s, ")");
 }
 
-static void print_compare(struct sql_table *table, const char *event)
+static void print_compare(struct trace_seq *s,
+			  struct sql_table *table, const char *event)
 {
 	struct expression *filter = table->filter;
 	struct expression *A, *B;
@@ -721,7 +732,7 @@ static void print_compare(struct sql_table *table, const char *event)
 	int len;
 
 	if (filter->type != EXPR_FILTER) {
-		printf("<NOT A FILTER>");
+		trace_seq_printf(s, "<NOT A FILTER>");
 		return;
 	}
 
@@ -736,18 +747,20 @@ static void print_compare(struct sql_table *table, const char *event)
 	if (!field)
 		return;
 
-	printf(" if %s %s %s", field, op, show_expr(B));
+	trace_seq_printf(s, " if %s %s %s", field, op, show_expr(B));
 }
 
-static void print_filter(struct sql_table *table, const char *event)
+static void print_filter(struct trace_seq *s,
+			 struct sql_table *table, const char *event)
 {
 	if (!table->filter || !event)
 		return;
 
-	print_compare(table, event);
+	print_compare(s, table, event);
 }
 
-static void print_system_event(const char *text, char delim)
+static void print_system_event(struct trace_seq *s,
+			       const char *text, char delim)
 {
 	struct tep_event *event;
 	char *name = strdup(text);
@@ -756,23 +769,23 @@ static void print_system_event(const char *text, char delim)
 	strtok(name, ".");
 	tok = strtok(NULL, ".");
 	if (tok) {
-		printf("%s%c%s", tok, delim, name);
+		trace_seq_printf(s, "%s%c%s", tok, delim, name);
 		goto out;
 	}
 
 	event = find_event(tep, name);
 	if (!event) {
-		printf("(system)%c%s", delim, name);
+		trace_seq_printf(s, "(system)%c%s", delim, name);
 		goto out;
 	}
 
-	printf("%s%c%s", event->system, delim, name);
+	trace_seq_printf(s, "%s%c%s", event->system, delim, name);
 
  out:
 	free(name);
 }
 
-static void make_histograms(struct sql_table *table)
+static void make_histograms(struct trace_seq *s, struct sql_table *table)
 {
 	struct sql_table *save_curr = curr_table;
 	struct var_list *vars = NULL;
@@ -783,40 +796,40 @@ static void make_histograms(struct sql_table *table)
 		return;
 
 	/* Need to do children and younger siblings first */
-	make_histograms(find_table(table->from));
+	make_histograms(s, find_table(table->from));
 
 	curr_table = table;
 
 	if (table->to)
 		from = resolve(table, table->from);
 
-	printf("echo 'hist:keys=");
-	print_keys(table, from);
-	print_values(table, from, VALUE_FROM, &vars);
-	print_filter(table, from);
+	trace_seq_printf(s, "echo 'hist:keys=");
+	print_keys(s, table, from);
+	print_values(s, table, from, VALUE_FROM, &vars);
+	print_filter(s, table, from);
 
 	if (!table->to)
 		from = resolve(table, table->from);
-	printf("' > events/");
-	print_system_event(from, '/');
-	printf("/trigger\n");
+	trace_seq_printf(s, "' > events/");
+	print_system_event(s, from, '/');
+	trace_seq_printf(s, "/trigger\n");
 
 	if (!table->to)
 		goto out;
 
-	printf("echo 'hist:keys=");
+	trace_seq_printf(s, "echo 'hist:keys=");
 	to = resolve(table, table->to);
-	print_keys(table, to);
-	print_values(table, to, VALUE_TO, &vars);
-	printf(":onmatch(");
-	print_system_event(from, '.');
-	printf(")");
+	print_keys(s, table, to);
+	print_values(s,table, to, VALUE_TO, &vars);
+	trace_seq_printf(s, ":onmatch(");
+	print_system_event(s, from, '.');
+	trace_seq_printf(s, ")");
 
-	print_trace(table);
-	print_filter(table, to);
-	printf("' > events/");
-	print_system_event(to, '/');
-	printf("/trigger\n");
+	print_trace(s, table);
+	print_filter(s, table, to);
+	trace_seq_printf(s, "' > events/");
+	print_system_event(s, to, '/');
+	trace_seq_printf(s, "/trigger\n");
 
 	while (vars) {
 		struct var_list *v = vars;
@@ -827,17 +840,22 @@ static void make_histograms(struct sql_table *table)
  out:
 	curr_table = save_curr;
 
-	make_histograms(find_table(table->to));
+	make_histograms(s, find_table(table->to));
 }
 
 static void dump_tables(void)
 {
+	struct trace_seq s;
 	static int debug;
 
 	if (!debug)
 		return;
 
-	dump_table(curr_table);
+	trace_seq_init(&s);
+	dump_table(&s, curr_table);
+
+	trace_seq_do_printf(&s);
+	trace_seq_destroy(&s);
 }
 
 static int parse_it(void)
@@ -893,6 +911,7 @@ int my_yyinput(char *buf, int max)
 
 int main (int argc, char **argv)
 {
+	struct trace_seq s;
 	char *trace_dir = NULL;
 	char buf[BUFSIZ];
 	FILE *fp;
@@ -937,8 +956,13 @@ int main (int argc, char **argv)
 		perror("failed to read local events ");
 
 	printf("\n");
-	make_synthetic_events(top_table);
+	trace_seq_init(&s);
+	make_synthetic_events(&s, top_table);
+	trace_seq_do_printf(&s);
 	printf("\n");
-	make_histograms(top_table);
+	trace_seq_reset(&s);
+	make_histograms(&s, top_table);
+	trace_seq_do_printf(&s);
+	trace_seq_destroy(&s);
 	return 0;
 }
