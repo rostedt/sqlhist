@@ -32,7 +32,7 @@ CFLAGS := $(TRACEFS_INCLUDES) $(TRACEEVENT_INCLUDES)
 
 all: $(TARGETS)
 
-sqlhist: sqlhist-core.c sqlhist-parse.c sqlhist.tab.c lex.yy.c
+sqlhist: sqlhist-main.c sqlhist-core.c sqlhist-parse.c sqlhist.tab.c lex.yy.c
 	gcc -g -Wall -o $@ $(CFLAGS) $^ $(LIBS)
 
 lex.yy.c: sqlhist.l

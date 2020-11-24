@@ -2,7 +2,7 @@
 /* code here */
 
 #include <stdarg.h>
-#include "sqlhist.h"
+#include "sqlhist-parse.h"
 
 extern int my_yyinput(char *buf, int max);
 extern void print_buffer_line(int line, int index);

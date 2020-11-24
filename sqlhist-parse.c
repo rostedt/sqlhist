@@ -7,7 +7,7 @@
 #include <errno.h>
 #include <unistd.h>
 
-#include "sqlhist.h"
+#include "sqlhist-parse.h"
 #include "sqlhist-local.h"
 
 struct sql_table *curr_table;

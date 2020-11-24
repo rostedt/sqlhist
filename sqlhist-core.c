@@ -2,12 +2,11 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <stdarg.h>
 #include <stdbool.h>
 #include <unistd.h>
 #include <errno.h>
 
-#include "sqlhist.h"
+#include "sqlhist-parse.h"
 #include "sqlhist-local.h"
 
 #include <trace-seq.h>
@@ -33,58 +32,6 @@
  */
 
 static struct tep_handle *tep;
-
-static void usage(char **argv)
-{
-	char *arg = argv[0];
-	char *p = arg+strlen(arg);
-
-	while (p >= arg && *p != '/')
-		p--;
-	p++;
-
-	printf("\nusage: %s [-hl][-t tracefs-path][file]\n"
-	       " file : holds sql statement (read from stdin if not present)\n"
-	       " -h : show this message\n"
-	       " -l : Only run the lexer (for testing)\n"
-	       " -t : Path to tracefs directory (looks for it via /proc/mounts if not set)\n"
-	       "\n",p);
-	exit(-1);
-}
-
-static void __vdie(const char *fmt, va_list ap, int err)
-{
-	int ret = errno;
-
-	if (err && errno)
-		perror("bmp-read");
-	else
-		ret = -1;
-
-	fprintf(stderr, "  ");
-	vfprintf(stderr, fmt, ap);
-
-	fprintf(stderr, "\n");
-	exit(ret);
-}
-
-void die(const char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	__vdie(fmt, ap, 0);
-	va_end(ap);
-}
-
-void pdie(const char *fmt, ...)
-{
-	va_list ap;
-
-	va_start(ap, fmt);
-	__vdie(fmt, ap, 1);
-	va_end(ap);
-}
 
 extern int yylex(void);
 extern char *yytext;
@@ -429,11 +376,9 @@ static void make_synthetic_events(struct trace_seq *s, struct sql_table *table)
 
 	curr_table = table;
 
-	trace_seq_printf(s, "echo '%s", table->name);
+	trace_seq_printf(s, "%s", table->name);
 	for (selection = table->selections; selection; selection = selection->next)
 		print_synthetic_field(s, table, selection);
-
-	trace_seq_printf(s, "' > synthetic_events\n");
 
 	curr_table = save_curr;
 
@@ -785,7 +730,8 @@ static void print_system_event(struct trace_seq *s,
 	free(name);
 }
 
-static void make_histograms(struct trace_seq *s, struct sql_table *table)
+static void make_histograms(struct trace_seq *s, struct sqlhist *sqlhist,
+			    struct sql_table *table)
 {
 	struct sql_table *save_curr = curr_table;
 	struct var_list *vars = NULL;
@@ -796,40 +742,56 @@ static void make_histograms(struct trace_seq *s, struct sql_table *table)
 		return;
 
 	/* Need to do children and younger siblings first */
-	make_histograms(s, find_table(table->from));
+	make_histograms(s, sqlhist, find_table(table->from));
 
 	curr_table = table;
 
 	if (table->to)
 		from = resolve(table, table->from);
 
-	trace_seq_printf(s, "echo 'hist:keys=");
+	trace_seq_reset(s);
+	trace_seq_printf(s, "hist:keys=");
 	print_keys(s, table, from);
 	print_values(s, table, from, VALUE_FROM, &vars);
 	print_filter(s, table, from);
+	trace_seq_terminate(s);
 
+	sqlhist->start_hist = strdup(s->buffer);
+
+	trace_seq_reset(s);
 	if (!table->to)
 		from = resolve(table, table->from);
-	trace_seq_printf(s, "' > events/");
+	trace_seq_printf(s, "events/");
 	print_system_event(s, from, '/');
-	trace_seq_printf(s, "/trigger\n");
+	trace_seq_printf(s, "/trigger");
+	trace_seq_terminate(s);
+
+	sqlhist->start_path = strdup(s->buffer);
 
 	if (!table->to)
 		goto out;
 
-	trace_seq_printf(s, "echo 'hist:keys=");
+	trace_seq_reset(s);
+	trace_seq_printf(s, "hist:keys=");
 	to = resolve(table, table->to);
 	print_keys(s, table, to);
 	print_values(s,table, to, VALUE_TO, &vars);
 	trace_seq_printf(s, ":onmatch(");
 	print_system_event(s, from, '.');
 	trace_seq_printf(s, ")");
-
 	print_trace(s, table);
 	print_filter(s, table, to);
-	trace_seq_printf(s, "' > events/");
+	trace_seq_terminate(s);
+
+	sqlhist->end_hist = strdup(s->buffer);
+
+	trace_seq_reset(s);
+	trace_seq_printf(s, "events/");
 	print_system_event(s, to, '/');
-	trace_seq_printf(s, "/trigger\n");
+	trace_seq_printf(s, "/trigger");
+	trace_seq_terminate(s);
+
+	sqlhist->end_path = strdup(s->buffer);
 
 	while (vars) {
 		struct var_list *v = vars;
@@ -840,7 +802,7 @@ static void make_histograms(struct trace_seq *s, struct sql_table *table)
  out:
 	curr_table = save_curr;
 
-	make_histograms(s, find_table(table->to));
+	make_histograms(s, sqlhist, find_table(table->to));
 }
 
 static void dump_tables(void)
@@ -856,18 +818,6 @@ static void dump_tables(void)
 
 	trace_seq_do_printf(&s);
 	trace_seq_destroy(&s);
-}
-
-static int parse_it(void)
-{
-	int ret;
-
-	ret = yyparse();
-	if (ret == -ENOMEM)
-		fprintf(stderr, "Failed to allocate memory\n");
-	dump_tables();
-
-	return ret;
 }
 
 static char *buffer;
@@ -909,60 +859,101 @@ int my_yyinput(char *buf, int max)
 	return max;
 }
 
-int main (int argc, char **argv)
+const char *sqlhist_start_event(struct sqlhist *sqlhist)
 {
+	return sqlhist->start_event;
+}
+
+const char *sqlhist_end_event(struct sqlhist *sqlhist)
+{
+	return sqlhist->end_event;
+}
+
+const char *sqlhist_synth_event(struct sqlhist *sqlhist)
+{
+	return sqlhist->synth_event;
+}
+
+const char *sqlhist_synth_event_def(struct sqlhist *sqlhist)
+{
+	return sqlhist->synth_event_def;
+}
+
+const char *sqlhist_start_hist(struct sqlhist *sqlhist)
+{
+	return sqlhist->start_hist;
+}
+
+const char *sqlhist_end_hist(struct sqlhist *sqlhist)
+{
+	return sqlhist->end_hist;
+}
+
+const char *sqlhist_synth_filter(struct sqlhist *sqlhist)
+{
+	return sqlhist->synth_filter;
+}
+
+struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
+{
+	struct sql_table *table;
+	struct sqlhist *sqlhist;
 	struct trace_seq s;
-	char *trace_dir = NULL;
-	char buf[BUFSIZ];
-	FILE *fp;
-	size_t r;
-	int c;
+	int ret;
 
-	for (;;) {
-		c = getopt(argc, argv, "hlt:");
-		if (c == -1)
-			break;
+	if (!sql_buffer)
+		return NULL;
 
-		switch(c) {
-		case 'h':
-			usage(argv);
-		case 'l':
-			return lex_it();
-		case 't':
-			trace_dir = optarg;
-			break;
-		}
-	}
-	if (argc - optind > 0) {
+	buffer = strdup(sql_buffer);
+	if (!buffer)
+		return NULL;
 
-		fp = fopen(argv[optind], "r");
-		if (!fp)
-			pdie("Error opening: %s", argv[optind]);
-		while ((r = fread(buf, 1, BUFSIZ, fp)) > 0) {
-			buffer = realloc(buffer, buffer_size + r + 1);
-			strncpy(buffer + buffer_size, buf, r);
-			buffer_size += r;
-		}
-		fclose(fp);
-		if (buffer_size)
-			buffer[buffer_size] = '\0';
-	}
+	ret = yyparse();
+	free(buffer);
 
-	if (parse_it())
-		exit(0);
+	if (ret == -ENOMEM)
+		return NULL;
+
+	dump_tables();
+
+	sqlhist = calloc(1, sizeof(*sqlhist));
+	if (!sqlhist)
+		return NULL;
 
 	tep = tracefs_local_events(trace_dir);
-	if (!tep)
-		perror("failed to read local events ");
+	if (!tep) {
+		/* Return an empty sqlhist */
+		return sqlhist;
+	}
 
 	printf("\n");
 	trace_seq_init(&s);
+	if (!s.buffer)
+		goto fail;
+
+	table = top_table;
 	make_synthetic_events(&s, top_table);
-	trace_seq_do_printf(&s);
-	printf("\n");
+	trace_seq_terminate(&s);
+	sqlhist->start_event = strdup(resolve(table, table->from));
+	if (table->to) {
+		sqlhist->end_event = strdup(resolve(table, table->from));
+		sqlhist->synth_event = strdup(table->name);
+		sqlhist->synth_event_def = strdup(s.buffer);
+	}
+
 	trace_seq_reset(&s);
-	make_histograms(&s, top_table);
+	make_histograms(&s, sqlhist, top_table);
 	trace_seq_do_printf(&s);
 	trace_seq_destroy(&s);
-	return 0;
+
+	return sqlhist;
+
+ fail:
+	free(sqlhist);
+	return NULL;
+}
+
+int sqlhist_lex_it(void)
+{
+	return lex_it();
 }

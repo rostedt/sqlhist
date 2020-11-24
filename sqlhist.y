@@ -6,7 +6,7 @@
 #include <string.h>
 #include <errno.h>
 
-#include "sqlhist.h"
+#include "sqlhist-parse.h"
 
 extern int yylex(void);
 extern void yyerror(char *fmt, ...);

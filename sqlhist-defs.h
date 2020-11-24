@@ -65,4 +65,16 @@ struct sql_table {
 	struct expression	*filter;
 };
 
+struct sqlhist {
+	char			*start_event;
+	char			*end_event;
+	char			*synth_event;
+	char			*synth_event_def;
+	char			*start_hist;
+	char			*end_hist;
+	char			*start_path;
+	char			*end_path;
+	char			*synth_filter;
+};
+
 #endif
