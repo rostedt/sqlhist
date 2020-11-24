@@ -846,6 +846,25 @@ static char *buffer;
 static size_t buffer_size;
 static size_t buffer_idx;
 
+void print_buffer_line(int line, int idx)
+{
+	int i;
+
+	if (!buffer)
+		return;
+
+	for (i = 0; line && buffer[i]; i++) {
+		if (buffer[i] == '\n')
+			line--;
+	}
+	for (; buffer[i] && buffer[i] != '\n'; i++)
+		printf("%c", buffer[i]);
+	printf("\n");
+	for (i = idx; i > 0; i--)
+		printf(" ");
+	printf("^\n");
+}
+
 int my_yyinput(char *buf, int max)
 {
 	if (!buffer)
