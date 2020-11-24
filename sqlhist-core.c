@@ -900,7 +900,8 @@ int main (int argc, char **argv)
 			buffer[buffer_size] = '\0';
 	}
 
-	parse_it();
+	if (parse_it())
+		exit(0);
 
 	tep = tracefs_local_events(trace_dir);
 	if (!tep)
