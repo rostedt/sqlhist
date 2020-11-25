@@ -284,6 +284,17 @@ int add_expr(const char *label, void *A)
 void *add_field(const char *field, const char *label)
 {
 	struct expression *e;
+	int len = strlen(field);
+
+	if (len > 7) {
+		if (strcmp(field + (len - 6), ".USECS") == 0) {
+			field = store_printf("%.*s.common_timestamp.usecs",
+					     len - 6, field);
+		} else if (strcmp(field + (len - 6), ".NSECS") == 0) {
+			field = store_printf("%.*s.common_timestamp",
+					     len - 6, field);
+		}
+	}
 
 	e = create_expression(store_str(field), NULL, EXPR_FIELD);
 	if (label)
