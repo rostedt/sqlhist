@@ -75,6 +75,7 @@ struct sqlhist {
 	char			*start_path;
 	char			*end_path;
 	char			*synth_filter;
+	char			*trace_dir;
 	char			*error;
 };
 

@@ -13,6 +13,7 @@ const char *sqlhist_synth_filter(struct sqlhist *sqlhist);
 const char *sqlhist_start_path(struct sqlhist *sqlhist);
 const char *sqlhist_end_path(struct sqlhist *sqlhist);
 
+const char *sqlhist_trace_dir(struct sqlhist *sqlhist);
 const char *sqlhist_error(struct sqlhist *sqlhist);
 
 struct sqlhist *sqlhist_parse(const char *buffer, const char *trace_dir);

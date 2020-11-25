@@ -939,6 +939,11 @@ const char *sqlhist_synth_filter(struct sqlhist *sqlhist)
 	return sqlhist->synth_filter;
 }
 
+const char *sqlhist_trace_dir(struct sqlhist *sqlhist)
+{
+	return sqlhist->trace_dir;
+}
+
 const char *sqlhist_error(struct sqlhist *sqlhist)
 {
 	return sqlhist->error;
@@ -982,6 +987,13 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 		/* Return an empty sqlhist */
 		return sqlhist;
 	}
+
+	if (!trace_dir)
+		trace_dir = tracefs_get_tracing_dir();
+
+	sqlhist->trace_dir = strdup(trace_dir);
+	if (!sqlhist->trace_dir)
+		goto fail;
 
 	trace_seq_init(&s);
 	if (!s.buffer)
