@@ -823,6 +823,41 @@ static void dump_tables(void)
 static char *buffer;
 static size_t buffer_size;
 static size_t buffer_idx;
+static char *parse_error_str;
+
+void parse_error(int line, int idx, const char *text,
+		 const char *fmt, va_list ap)
+{
+	struct trace_seq s;
+	int i;
+
+	if (!buffer)
+		return;
+
+	trace_seq_init(&s);
+	if (!s.buffer) {
+		fprintf(stderr, "Error allocating internal buffer\n");
+		return;
+	}
+
+	for (i = 0; line && buffer[i]; i++) {
+		if (buffer[i] == '\n')
+			line--;
+	}
+	for (; buffer[i] && buffer[i] != '\n'; i++)
+		trace_seq_putc(&s, buffer[i]);
+	trace_seq_putc(&s, '\n');
+	for (i = idx; i > 0; i--)
+		trace_seq_putc(&s, ' ');
+	trace_seq_puts(&s, "^\n");
+	trace_seq_printf(&s, "ERROR: '%s'\n", text);
+	trace_seq_vprintf(&s, fmt, ap);
+
+	trace_seq_terminate(&s);
+
+	parse_error_str = strdup(s.buffer);
+	trace_seq_destroy(&s);
+}
 
 void print_buffer_line(int line, int idx)
 {
@@ -889,9 +924,24 @@ const char *sqlhist_end_hist(struct sqlhist *sqlhist)
 	return sqlhist->end_hist;
 }
 
+const char *sqlhist_start_path(struct sqlhist *sqlhist)
+{
+	return sqlhist->start_path;
+}
+
+const char *sqlhist_end_path(struct sqlhist *sqlhist)
+{
+	return sqlhist->end_path;
+}
+
 const char *sqlhist_synth_filter(struct sqlhist *sqlhist)
 {
 	return sqlhist->synth_filter;
+}
+
+const char *sqlhist_error(struct sqlhist *sqlhist)
+{
+	return sqlhist->error;
 }
 
 struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
@@ -907,6 +957,7 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 	buffer = strdup(sql_buffer);
 	if (!buffer)
 		return NULL;
+	buffer_size = strlen(buffer);
 
 	ret = yyparse();
 	free(buffer);
@@ -917,8 +968,14 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 	dump_tables();
 
 	sqlhist = calloc(1, sizeof(*sqlhist));
+
 	if (!sqlhist)
 		return NULL;
+
+	if (ret) {
+		sqlhist->error = parse_error_str;
+		return sqlhist;
+	}
 
 	tep = tracefs_local_events(trace_dir);
 	if (!tep) {
@@ -926,7 +983,6 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 		return sqlhist;
 	}
 
-	printf("\n");
 	trace_seq_init(&s);
 	if (!s.buffer)
 		goto fail;
@@ -943,7 +999,6 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 
 	trace_seq_reset(&s);
 	make_histograms(&s, sqlhist, top_table);
-	trace_seq_do_printf(&s);
 	trace_seq_destroy(&s);
 
 	return sqlhist;

@@ -102,12 +102,23 @@ int main (int argc, char **argv)
 
 	sqlhist = sqlhist_parse(buffer, trace_dir);
 
-	if (!sqlhist || !sqlhist_start_event(sqlhist))
+	if (!sqlhist)
 		pdie("Error parsing sqlhist\n");
 
+	if (!sqlhist_start_event(sqlhist))
+		die("Error:\n%s", sqlhist_error(sqlhist));
+
 	if (sqlhist_end_event(sqlhist)) {
-		printf("echo '%s' > synthetic_events",
+		printf("echo '%s' > synthetic_events\n",
 		       sqlhist_synth_event_def(sqlhist));
+	}
+
+	printf("echo '%s' > %s\n",
+	       sqlhist_start_hist(sqlhist), sqlhist_start_path(sqlhist));
+
+	if (sqlhist_end_event(sqlhist)) {
+		printf("echo '%s' > %s\n",
+		       sqlhist_end_hist(sqlhist), sqlhist_end_path(sqlhist));
 	}
 
 	return 0;

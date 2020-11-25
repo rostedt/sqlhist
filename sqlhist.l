@@ -5,7 +5,6 @@
 #include "sqlhist-parse.h"
 
 extern int my_yyinput(char *buf, int max);
-extern void print_buffer_line(int line, int index);
 
 #undef YY_INPUT
 #define YY_INPUT(b, r, m) ({r = my_yyinput(b, m);})
@@ -57,11 +56,7 @@ void yyerror(const char *fmt, ...)
 {
 	va_list ap;
 
-	printf("\n");
-	print_buffer_line(line_no, line_idx - strlen(yytext));
 	va_start(ap, fmt);
-	printf("ERROR: '%s'\n", yytext);
-	vprintf(fmt, ap);
-	printf("\n");
+	parse_error(line_no, line_idx - strlen(yytext), yytext, fmt, ap);
 	va_end(ap);
 }
