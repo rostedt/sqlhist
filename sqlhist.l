@@ -15,7 +15,7 @@ extern int my_yyinput(char *buf, int max);
 static int line_no = 0;
 static int line_idx = 0;
 
-#define HANDLE_COLUMN line_idx += strlen(yytext)
+#define HANDLE_COLUMN do { line_idx += strlen(yytext); } while (0)
 
 %}
 
