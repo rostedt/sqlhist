@@ -19,4 +19,6 @@ const char *sqlhist_error(struct sqlhist *sqlhist);
 struct sqlhist *sqlhist_parse(const char *buffer, const char *trace_dir);
 int sqlhist_lex_it(void);
 
+void sqlhist_destroy(struct sqlhist *sqlhist);
+
 #endif

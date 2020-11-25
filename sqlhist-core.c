@@ -6,6 +6,7 @@
 #include <unistd.h>
 #include <errno.h>
 
+#include "sqlhist.h"
 #include "sqlhist-parse.h"
 #include "sqlhist-local.h"
 
@@ -79,6 +80,12 @@ static const char *resolve(struct sql_table *table, const char *label)
 	curr_table = save_curr;
 
 	return label;
+}
+
+static const char *resolve_expr(struct sql_table *table,
+				struct expression *e)
+{
+	return resolve(table, show_expr(e));
 }
 
 static const char *expand(const char *str)
@@ -168,9 +175,10 @@ const char *__show_expr(struct expression *e, bool eval)
 	return ret;
 }
 
-static struct sql_table *find_table(const char *name)
+static struct sql_table *find_table(struct expression *e)
 {
 	struct table_map *tmap;
+	const char *name = show_expr(e);
 
 	for (tmap = table_list; tmap; tmap = tmap->next)
 		if (strcmp(tmap->name, name) == 0)
@@ -342,7 +350,7 @@ static void print_synthetic_field(struct trace_seq *s,
 		return;
 	}
 
-	to = resolve(table, table->to);
+	to = resolve_expr(table, table->to);
 	len = strlen(to);
 
 	actual = show_raw_expr(e);
@@ -634,7 +642,7 @@ static void print_trace_field(struct trace_seq *s,
 	const char *to;
 	int len;
 
-	to = resolve(table, table->to);
+	to = resolve_expr(table, table->to);
 	len = strlen(to);
 
 	actual = show_raw_expr(e);
@@ -747,7 +755,7 @@ static void make_histograms(struct trace_seq *s, struct sqlhist *sqlhist,
 	curr_table = table;
 
 	if (table->to)
-		from = resolve(table, table->from);
+		from = resolve_expr(table, table->from);
 
 	trace_seq_reset(s);
 	trace_seq_printf(s, "hist:keys=");
@@ -760,7 +768,7 @@ static void make_histograms(struct trace_seq *s, struct sqlhist *sqlhist,
 
 	trace_seq_reset(s);
 	if (!table->to)
-		from = resolve(table, table->from);
+		from = resolve_expr(table, table->from);
 	trace_seq_printf(s, "events/");
 	print_system_event(s, from, '/');
 	trace_seq_printf(s, "/trigger");
@@ -773,7 +781,7 @@ static void make_histograms(struct trace_seq *s, struct sqlhist *sqlhist,
 
 	trace_seq_reset(s);
 	trace_seq_printf(s, "hist:keys=");
-	to = resolve(table, table->to);
+	to = resolve_expr(table, table->to);
 	print_keys(s, table, to);
 	print_values(s,table, to, VALUE_TO, &vars);
 	trace_seq_printf(s, ":onmatch(");
@@ -1002,9 +1010,9 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 	table = top_table;
 	make_synthetic_events(&s, top_table);
 	trace_seq_terminate(&s);
-	sqlhist->start_event = strdup(resolve(table, table->from));
+	sqlhist->start_event = strdup(resolve_expr(table, table->from));
 	if (table->to) {
-		sqlhist->end_event = strdup(resolve(table, table->from));
+		sqlhist->end_event = strdup(resolve_expr(table, table->from));
 		sqlhist->synth_event = strdup(table->name);
 		sqlhist->synth_event_def = strdup(s.buffer);
 	}
@@ -1013,14 +1021,36 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 	make_histograms(&s, sqlhist, top_table);
 	trace_seq_destroy(&s);
 
+	clean_stores();
+
 	return sqlhist;
 
  fail:
-	free(sqlhist);
+	sqlhist_destroy(sqlhist);
 	return NULL;
 }
 
 int sqlhist_lex_it(void)
 {
 	return lex_it();
+}
+
+void sqlhist_destroy(struct sqlhist *sqlhist)
+{
+	if (!sqlhist)
+		return;
+
+	free(sqlhist->start_event);
+	free(sqlhist->end_event);
+	free(sqlhist->synth_event);
+	free(sqlhist->synth_event_def);
+	free(sqlhist->start_hist);
+	free(sqlhist->end_hist);
+	free(sqlhist->start_path);
+	free(sqlhist->end_path);
+	free(sqlhist->synth_filter);
+	free(sqlhist->trace_dir);
+	free(sqlhist->error);
+
+	free(sqlhist);
 }

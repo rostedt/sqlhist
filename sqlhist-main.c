@@ -101,6 +101,7 @@ int main (int argc, char **argv)
 	}
 
 	sqlhist = sqlhist_parse(buffer, trace_dir);
+	free(buffer);
 
 	if (!sqlhist)
 		pdie("Error parsing sqlhist\n");
@@ -120,6 +121,8 @@ int main (int argc, char **argv)
 		printf("echo '%s' > %s\n",
 		       sqlhist_end_hist(sqlhist), sqlhist_end_path(sqlhist));
 	}
+
+	sqlhist_destroy(sqlhist);
 
 	return 0;
 }

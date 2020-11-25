@@ -23,6 +23,8 @@ struct str_hash {
 
 static struct str_hash *str_hash[1 << HASH_BITS];
 
+static struct expression *create_expression(void *A, void *B, enum expr_type type);
+
 static int no_table(void)
 {
 	static int once;
@@ -57,12 +59,12 @@ int table_start(void)
 
 void add_from(void *item)
 {
-	curr_table->from = show_expr(item);
+	curr_table->from = item;
 }
 
 void add_to(void *item)
 {
-	curr_table->to = show_expr(item);
+	curr_table->to = item;
 }
 
 static int add_table(const char *label)
@@ -116,7 +118,8 @@ int table_end(const char *name)
 int from_table_end(const char *name)
 {
 	if (curr_table->parent) {
-		curr_table->parent->from = store_str(name);
+		curr_table->parent->from =
+			create_expression(store_str(name), NULL, EXPR_FIELD);
 		if (!curr_table->parent->from)
 			return -ENOMEM;
 	}
@@ -219,6 +222,8 @@ const char *show_expr(void *expr)
 	return __show_expr(expr, false);
 }
 
+static struct expression *estore;
+
 static struct expression *create_expression_op(void *A, void *B, const char *op,
 					       enum expr_type type)
 {
@@ -232,6 +237,9 @@ static struct expression *create_expression_op(void *A, void *B, const char *op,
 	e->op = op;
 	e->type = type;
 	e->table = curr_table;
+
+	e->next = estore;
+	estore = e;
 
 	return e;
 }
@@ -384,4 +392,25 @@ char * store_printf(const char *fmt, ...)
 		*pstr = str;
 
 	return *pstr;
+}
+
+void clean_stores(void)
+{
+	struct expression *e;
+	int i;
+
+	while ((e = estore)) {
+		estore = e->next;
+		free(e);
+	}
+
+	for (i = 0; i < (1 << HASH_BITS); i++) {
+		struct str_hash *str;
+
+		while ((str = str_hash[i])) {
+			str_hash[i] = str->next;
+			free(str->str);
+			free(str);
+		}
+	}
 }

@@ -37,6 +37,8 @@ int add_selection(void *item);
 void add_from(void *item);
 void add_to(void *item);
 
+void clean_stores(void);
+
 extern void parse_error(int line, int index, const char *text,
 			const char *fmt, va_list ap);
 
