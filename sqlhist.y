@@ -157,15 +157,15 @@ event_map :
  ;
 
 compare :
-   item '<' item	{ $$ = add_filter($1, $3, "<"); CHECK_RETURN_PTR($$); }
- | item '>' item	{ $$ = add_filter($1, $3, ">"); CHECK_RETURN_PTR($$); }
- | item LE item		{ $$ = add_filter($1, $3, "<="); CHECK_RETURN_PTR($$); }
- | item GE item		{ $$ = add_filter($1, $3, ">="); CHECK_RETURN_PTR($$); }
- | item '=' item	{ $$ = add_filter($1, $3, "=="); CHECK_RETURN_PTR($$); }
- | item EQ item		{ $$ = add_filter($1, $3, "=="); CHECK_RETURN_PTR($$); }
- | item NEQ item	{ $$ = add_filter($1, $3, "!="); CHECK_RETURN_PTR($$); }
- | item '&' item	{ $$ = add_filter($1, $3, "&"); CHECK_RETURN_PTR($$); }
- | item '~' item	{ $$ = add_filter($1, $3, "~"); CHECK_RETURN_PTR($$); }
+   field '<' field	{ $$ = add_filter($1, $3, "<"); CHECK_RETURN_PTR($$); }
+ | field '>' field	{ $$ = add_filter($1, $3, ">"); CHECK_RETURN_PTR($$); }
+ | field LE field	{ $$ = add_filter($1, $3, "<="); CHECK_RETURN_PTR($$); }
+ | field GE field	{ $$ = add_filter($1, $3, ">="); CHECK_RETURN_PTR($$); }
+ | field '=' field	{ $$ = add_filter($1, $3, "=="); CHECK_RETURN_PTR($$); }
+ | field EQ field	{ $$ = add_filter($1, $3, "=="); CHECK_RETURN_PTR($$); }
+ | field NEQ field	{ $$ = add_filter($1, $3, "!="); CHECK_RETURN_PTR($$); }
+ | field '&' field	{ $$ = add_filter($1, $3, "&"); CHECK_RETURN_PTR($$); }
+ | field '~' field	{ $$ = add_filter($1, $3, "~"); CHECK_RETURN_PTR($$); }
 ;
 
 where_clause :

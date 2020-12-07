@@ -140,6 +140,20 @@ static char *expr_op_connect(void *A, void *B, const char *op,
 	return ret;
 }
 
+static char *str_op_connect(const char *a, const char *b, const char *op)
+{
+	char *ret, *str;
+	int r;
+
+	r = asprintf(&str, "(%s %s %s)", a, op, b );
+	if (r < 0)
+		return NULL;
+
+	ret = store_str(str);
+	free(str);
+	return ret;
+}
+
 const char *__show_expr(struct expression *e, bool eval)
 {
 	const char *(*show)(void *);
@@ -169,7 +183,7 @@ const char *__show_expr(struct expression *e, bool eval)
 		ret = expr_op_connect(e->A, e->B, "/", show);
 		break;
 	case EXPR_FILTER:
-		ret = expr_op_connect(e->A, e->B, e->op, show);
+		ret = str_op_connect(e->A, e->B, e->op);
 		break;
 	}
 	return ret;
