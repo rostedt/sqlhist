@@ -1006,7 +1006,11 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 
 	tep = tracefs_local_events(trace_dir);
 	if (!tep) {
+		if (!trace_dir)
+			trace_dir = "tracefs directory";
 		/* Return an empty sqlhist */
+		asprintf(&sqlhist->error, "%s\nFailed to read %s",
+			 strerror(errno), trace_dir);
 		return sqlhist;
 	}
 
