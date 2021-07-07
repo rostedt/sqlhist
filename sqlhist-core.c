@@ -1015,7 +1015,7 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 	}
 
 	if (!trace_dir)
-		trace_dir = tracefs_get_tracing_dir();
+		trace_dir = tracefs_tracing_dir();
 
 	sqlhist->trace_dir = strdup(trace_dir);
 	if (!sqlhist->trace_dir)
