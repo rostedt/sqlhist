@@ -305,7 +305,16 @@ void *add_field(const char *field, const char *label)
 
 void *add_filter(char *a, char *b, const char *op)
 {
-	return create_expression_op(a, b, op, EXPR_FILTER);
+	void *A;
+	void *B;
+
+	A = create_expression(store_str(a), NULL, EXPR_FIELD);
+	B = create_expression(store_str(b), NULL, EXPR_FIELD);
+
+	if (!A || !B)
+		return NULL;
+
+	return create_expression_op(A, B, op, EXPR_FILTER);
 }
 
 void add_where(void *A)

@@ -157,7 +157,7 @@ static char *str_op_connect(const char *a, const char *b, const char *op)
 const char *__show_expr(struct expression *e, bool eval)
 {
 	const char *(*show)(void *);
-	char *ret;
+	char *ret = NULL;
 
 	if (eval)
 		show = show_raw_expr;
@@ -824,7 +824,8 @@ static void make_histograms(struct trace_seq *s, struct sqlhist *sqlhist,
  out:
 	curr_table = save_curr;
 
-	make_histograms(s, sqlhist, find_table(table->to));
+	if (table->to)
+		make_histograms(s, sqlhist, find_table(table->to));
 }
 
 static void dump_tables(void)

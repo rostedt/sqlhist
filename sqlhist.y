@@ -50,13 +50,13 @@ int x;
 %type <string> where_clause compare
 
 %type <expr>  selection_expr item named_field join_clause
+%type <expr>  opt_join_clause
 
 %%
 
 start:
    select_statement { table_end(NULL); }
  | select_name
- | simple_select { simple_table_end(); }
  ;
 
 select_name :
@@ -72,11 +72,6 @@ label : AS name { CHECK_RETURN_PTR($$ = store_printf("%s", $2)); }
  ;
 
 select : SELECT  { table_start(); }
-  ;
-
-simple_select :
-     select selection_list from_clause
-  |  select selection_list from_clause where_clause
   ;
 
 select_statement :
@@ -176,9 +171,13 @@ where_clause :
    }
  ;
 
+opt_where_clause :
+   /* empty */
+ | where_clause
+;
+
 table_exp :
-   event_map
- | event_map where_clause
+   from_clause opt_join_clause opt_where_clause
  ;
 
 from_clause :
@@ -201,8 +200,17 @@ from_clause :
  ;
 
 join_clause :
-  JOIN item	{ CHECK_RETURN_PTR($2); add_to($2); $$ = $2; }
+  JOIN item ON match_clause	{
+					add_to($2);
+					$$ = store_printf("TO %s",
+							  show_expr($2));
+				}
  ;
+
+opt_join_clause :
+  /* empty */		{ $$ = NULL; }
+ | join_clause
+;
 
 on_clause :
   ON match_clause
