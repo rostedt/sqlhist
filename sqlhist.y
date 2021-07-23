@@ -8,8 +8,10 @@
 
 #include "sqlhist-parse.h"
 
-extern int yylex(void);
-extern void yyerror(char *fmt, ...);
+#define scanner sb->scanner
+
+extern int yylex(YYSTYPE *yylval, void *);
+extern void yyerror(struct sqlhist_bison *, char *fmt, ...);
 
 #define CHECK_RETURN_PTR(x)					\
 	do {							\
@@ -28,6 +30,10 @@ extern void yyerror(char *fmt, ...);
 	} while (0)
 
 %}
+
+%define api.pure
+%lex-param {void *scanner}
+%parse-param {struct sqlhist_bison *sb}
 
 %union {
 	int	s32;

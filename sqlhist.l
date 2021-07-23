@@ -12,6 +12,8 @@ extern int my_yyinput(char *buf, int max);
 #define YY_NO_INPUT
 #define YY_NO_UNPUT
 
+#define yytext yyg->yytext_r
+
 static int line_no = 0;
 static int line_idx = 0;
 
@@ -20,7 +22,8 @@ static int line_idx = 0;
 %}
 
 %option caseless
-
+%option reentrant
+%option bison-bridge
 %%
 
 select { HANDLE_COLUMN; return SELECT; }
@@ -30,9 +33,9 @@ join { HANDLE_COLUMN; return JOIN; }
 on { HANDLE_COLUMN; return ON; }
 where { HANDLE_COLUMN; return WHERE; }
 
-\$[a-z][a-z0-9_]* { HANDLE_COLUMN; yylval.string = store_str(yytext); return VARIABLE; }
+\$[a-z][a-z0-9_]* { HANDLE_COLUMN; yylval->string = store_str(yyg->yytext_r); return VARIABLE; }
 
-[a-z0-9_\.]+ {  HANDLE_COLUMN; yylval.string = store_str(yytext); return STRING; }
+[a-z0-9_\.]+ {  HANDLE_COLUMN; yylval->string = store_str(yyg->yytext_r); return STRING; }
 
 \!= { HANDLE_COLUMN; return NEQ; }
 \<= { HANDLE_COLUMN; return LE; }
@@ -47,13 +50,14 @@ where { HANDLE_COLUMN; return WHERE; }
 
 %%
 
-int yywrap(void)
+int yywrap(void *data)
 {
 	return 1;
 }
 
-void yyerror(const char *fmt, ...)
+void yyerror(struct sqlhist_bison *sb, char *fmt, ...)
 {
+	struct yyguts_t * yyg = (struct yyguts_t*)sb->scanner;
 	va_list ap;
 
 	va_start(ap, fmt);

@@ -10,6 +10,9 @@
 #include "sqlhist-parse.h"
 #include "sqlhist-local.h"
 
+extern int yylex_init(void* ptr_yy_globals);
+extern int yylex_destroy (void * yyscanner );
+
 #include <trace-seq.h>
 
 /*
@@ -34,16 +37,20 @@
 
 static struct tep_handle *tep;
 
-extern int yylex(void);
+extern int yylex(void *);
 extern char *yytext;
 
 static int lex_it(void)
 {
+	struct sqlhist_bison sb;
 	int ret;
 
+	yylex_init(&sb.scanner);
 	do {
-		ret = yylex();
+		ret = yylex(sb.scanner);
 	} while (ret > 0);
+
+	yylex_destroy(sb.scanner);
 
 	return ret;
 }
@@ -977,6 +984,7 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 	struct sql_table *table;
 	struct sqlhist *sqlhist;
 	struct trace_seq s;
+	struct sqlhist_bison sb;
 	int ret;
 
 	if (!sql_buffer)
@@ -987,7 +995,9 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 		return NULL;
 	buffer_size = strlen(buffer);
 
-	ret = yyparse();
+	yylex_init(&sb.scanner);
+	ret = yyparse(&sb);
+	yylex_destroy(sb.scanner);
 	free(buffer);
 
 	if (ret == -ENOMEM)
@@ -1051,7 +1061,13 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 
 int sqlhist_lex_it(void)
 {
-	return lex_it();
+	void *scanner;
+	int ret;
+
+	yylex_init(&scanner);
+	ret = lex_it();
+	yylex_destroy(scanner);
+	return ret;
 }
 
 void sqlhist_destroy(struct sqlhist *sqlhist)

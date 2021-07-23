@@ -9,6 +9,10 @@
 #include "tracefs-stubs.h"
 #endif
 
+struct sqlhist_bison {
+	void *scanner;
+};
+
 #include "sqlhist.tab.h"
 
 #include "sqlhist-defs.h"
