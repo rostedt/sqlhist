@@ -45,7 +45,7 @@ extern void yyerror(char *fmt, ...);
 
 %type <string> name field label
 %type <string> selection_list table_exp selection_item
-%type <string> from_clause select_statement event_map
+%type <string> from_clause select_statement
 %type <string> where_clause compare
 
 %type <expr>  selection_expr item named_field join_clause
@@ -146,10 +146,6 @@ name :
    STRING
  ;
 
-event_map :
-   from_clause join_clause on_clause { $$ = store_printf("%s TO %s", $1, show_expr($2)); }
- ;
-
 compare :
    field '<' field	{ $$ = add_filter($1, $3, "<"); CHECK_RETURN_PTR($$); }
  | field '>' field	{ $$ = add_filter($1, $3, ">"); CHECK_RETURN_PTR($$); }
@@ -210,10 +206,6 @@ opt_join_clause :
   /* empty */		{ $$ = NULL; }
  | join_clause
 ;
-
-on_clause :
-  ON match_clause
- ;
 
 match :
    item '=' item { add_match(show_expr($1), show_expr($3)); }
