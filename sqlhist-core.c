@@ -39,7 +39,6 @@ extern int yylex_destroy (void * yyscanner );
 static struct tep_handle *tep;
 
 extern int yylex(void *);
-extern char *yytext;
 
 static int lex_it(void)
 {
