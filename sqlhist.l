@@ -12,6 +12,8 @@ extern int my_yyinput(char *buf, int max);
 #define YY_NO_INPUT
 #define YY_NO_UNPUT
 
+#define YY_EXTRA_TYPE struct sqlhist_bison *
+
 #define yytext yyg->yytext_r
 
 static int line_no = 0;
@@ -33,9 +35,19 @@ join { HANDLE_COLUMN; return JOIN; }
 on { HANDLE_COLUMN; return ON; }
 where { HANDLE_COLUMN; return WHERE; }
 
-\$[a-z][a-z0-9_]* { HANDLE_COLUMN; yylval->string = store_str(yyg->yytext_r); return VARIABLE; }
+\$[a-z][a-z0-9_]* {
+	struct sqlhist_bison *sb = yyextra;
+	HANDLE_COLUMN;
+	yylval->string = store_str(sb, yyg->yytext_r);
+	return VARIABLE;
+}
 
-[a-z0-9_\.]+ {  HANDLE_COLUMN; yylval->string = store_str(yyg->yytext_r); return STRING; }
+[a-z0-9_\.]+ {
+	struct sqlhist_bison *sb = yyextra;
+	HANDLE_COLUMN;
+	yylval->string = store_str(sb, yyg->yytext_r);
+	return STRING;
+}
 
 \!= { HANDLE_COLUMN; return NEQ; }
 \<= { HANDLE_COLUMN; return LE; }

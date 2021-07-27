@@ -17,29 +17,29 @@ struct sqlhist_bison {
 
 #include "sqlhist-defs.h"
 
-char * store_str(const char *str);
-char * store_printf(const char *fmt, ...);
-int add_label(const char *label, const char *val);
-int add_match(const char *A, const char *B);
-int table_start(void);
-int table_end(const char *name);
-int from_table_end(const char *name);
-int simple_table_end(void);
+char * store_str(struct sqlhist_bison *sb, const char *str);
+char * store_printf(struct sqlhist_bison *sb, const char *fmt, ...);
+int add_label(struct sqlhist_bison *sb, const char *label, const char *val);
+int add_match(struct sqlhist_bison *sb, const char *A, const char *B);
+int table_start(struct sqlhist_bison *sb);
+int table_end(struct sqlhist_bison *sb, const char *name);
+int from_table_end(struct sqlhist_bison *sb, const char *name);
+int simple_table_end(struct sqlhist_bison *sb);
 
 const char *show_expr(void *expr);
-void *add_plus(void *A, void *B);
-void *add_minus(void *A, void *B);
-void *add_mult(void *A, void *B);
-void *add_divid(void *A, void *B);
-void *add_field(const char *field, const char *label);
-void *add_filter(char *a, char *b, const char *op);
+void *add_plus(struct sqlhist_bison *sb, void *A, void *B);
+void *add_minus(struct sqlhist_bison *sb, void *A, void *B);
+void *add_mult(struct sqlhist_bison *sb, void *A, void *B);
+void *add_divid(struct sqlhist_bison *sb, void *A, void *B);
+void *add_field(struct sqlhist_bison *sb, const char *field, const char *label);
+void *add_filter(struct sqlhist_bison *sb, char *a, char *b, const char *op);
 
 int add_expr(const char *name, void *expr);
 void add_where(void *expr);
 
-int add_selection(void *item);
-void add_from(void *item);
-void add_to(void *item);
+int add_selection(struct sqlhist_bison *sb, void *item);
+void add_from(struct sqlhist_bison *sb, void *item);
+void add_to(struct sqlhist_bison *sb, void *item);
 
 void clean_stores(void);
 

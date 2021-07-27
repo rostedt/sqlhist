@@ -23,7 +23,9 @@ struct str_hash {
 
 static struct str_hash *str_hash[1 << HASH_BITS];
 
-static struct expression *create_expression(void *A, void *B, enum expr_type type);
+static struct expression *create_expression(struct sqlhist_bison *sb,
+					    void *A, void *B,
+					    enum expr_type type);
 
 static int no_table(void)
 {
@@ -36,7 +38,7 @@ static int no_table(void)
 	return 1;
 }
 
-int table_start(void)
+int table_start(struct sqlhist_bison *sb)
 {
 	struct sql_table *table;;
 
@@ -44,6 +46,7 @@ int table_start(void)
 	if (!table)
 		return -ENOMEM;
 
+	table->sb = sb;
 	table->next_selection = &table->selections;
 
 	table->parent = curr_table;
@@ -57,17 +60,17 @@ int table_start(void)
 	return 0;
 }
 
-void add_from(void *item)
+void add_from(struct sqlhist_bison *sb, void *item)
 {
 	curr_table->from = item;
 }
 
-void add_to(void *item)
+void add_to(struct sqlhist_bison *sb, void *item)
 {
 	curr_table->to = item;
 }
 
-static int add_table(const char *label)
+static int add_table(struct sqlhist_bison *sb, const char *label)
 {
 	struct table_map *tmap;
 
@@ -79,7 +82,7 @@ static int add_table(const char *label)
 		return -ENOMEM;
 
 	tmap->table = curr_table;
-	tmap->name = store_str(label);
+	tmap->name = store_str(sb, label);
 	if (!tmap->name) {
 		free(tmap);
 		return -ENOMEM;
@@ -91,21 +94,21 @@ static int add_table(const char *label)
 	return 0;
 }
 
-int table_end(const char *name)
+int table_end(struct sqlhist_bison *sb, const char *name)
 {
 	static int anony_cnt;
 	char *tname;
 	int ret;
 
 	if (!name)
-		tname = store_printf("Anonymous%d", anony_cnt++);
+		tname = store_printf(sb, "Anonymous%d", anony_cnt++);
 	else
-		tname = store_str(name);
+		tname = store_str(sb, name);
 
 	if (!tname)
 		return -ENOMEM;
 
-	ret = add_table(tname);
+	ret = add_table(sb, tname);
 	if (ret)
 		return ret;
 
@@ -115,25 +118,26 @@ int table_end(const char *name)
 	return 0;
 }
 
-int from_table_end(const char *name)
+int from_table_end(struct sqlhist_bison *sb, const char *name)
 {
 	if (curr_table->parent) {
 		curr_table->parent->from =
-			create_expression(store_str(name), NULL, EXPR_FIELD);
+			create_expression(sb, store_str(sb, name), NULL, EXPR_FIELD);
 		if (!curr_table->parent->from)
 			return -ENOMEM;
 	}
 
-	return table_end(name);
+	return table_end(sb, name);
 }
 
 /* Just a histogram table */
-int simple_table_end(void)
+int simple_table_end(struct sqlhist_bison *sb)
 {
 	return 0;
 }
 
-static int insert_label(const char *label, void *val, enum label_type type)
+static int insert_label(struct sqlhist_bison *sb, const char *label,
+			void *val, enum label_type type)
 {
 	struct label_map *lmap;
 	struct sql_table *table = curr_table;
@@ -149,7 +153,7 @@ static int insert_label(const char *label, void *val, enum label_type type)
 	lmap = malloc(sizeof(*lmap));
 	if (!lmap)
 		return -ENOMEM;
-	lmap->label = store_str(label);
+	lmap->label = store_str(sb, label);
 	if (!lmap->label) {
 		free(lmap);
 		return -ENOMEM;
@@ -162,12 +166,12 @@ static int insert_label(const char *label, void *val, enum label_type type)
 	return 0;
 }
 
-int add_label(const char *label, const char *val)
+int add_label(struct sqlhist_bison *sb, const char *label, const char *val)
 {
-	return insert_label(label, store_str(val), LABEL_STRING);
+	return insert_label(sb, label, store_str(sb, val), LABEL_STRING);
 }
 
-int add_match(const char *A, const char *B)
+int add_match(struct sqlhist_bison *sb, const char *A, const char *B)
 {
 	struct match_map *map;
 
@@ -177,8 +181,8 @@ int add_match(const char *A, const char *B)
 	map = malloc(sizeof(*map));
 	if (!map)
 		return -ENOMEM;
-	map->A = store_str(A);
-	map->B = store_str(B);
+	map->A = store_str(sb, A);
+	map->B = store_str(sb, B);
 
 	if (!map->A || !map->B) {
 		free(map);
@@ -191,7 +195,7 @@ int add_match(const char *A, const char *B)
 	return 0;
 }
 
-int add_selection(void *item)
+int add_selection(struct sqlhist_bison *sb, void *item)
 {
 	struct selection *selection;
 	struct expression *e = item;
@@ -224,7 +228,8 @@ const char *show_expr(void *expr)
 
 static struct expression *estore;
 
-static struct expression *create_expression_op(void *A, void *B, const char *op,
+static struct expression *create_expression_op(struct sqlhist_bison *sb,
+					       void *A, void *B, const char *op,
 					       enum expr_type type)
 {
 	struct expression *e;
@@ -232,6 +237,7 @@ static struct expression *create_expression_op(void *A, void *B, const char *op,
 	e = calloc(sizeof(*e), 1);
 	if (!e)
 		return NULL;
+	e->sb = sb;
 	e->A = A;
 	e->B = B;
 	e->op = op;
@@ -244,77 +250,81 @@ static struct expression *create_expression_op(void *A, void *B, const char *op,
 	return e;
 }
 
-static struct expression *create_expression(void *A, void *B, enum expr_type type)
+static struct expression *create_expression(struct sqlhist_bison *sb,
+					    void *A, void *B,
+					    enum expr_type type)
 {
-	return create_expression_op(A, B, NULL, type);
+	return create_expression_op(sb, A, B, NULL, type);
 }
 
-void *add_plus(void *A, void *B)
+void *add_plus(struct sqlhist_bison *sb, void *A, void *B)
 {
-	return create_expression(A, B, EXPR_PLUS);
+	return create_expression(sb, A, B, EXPR_PLUS);
 }
 
-void *add_minus(void *A, void *B)
+void *add_minus(struct sqlhist_bison *sb, void *A, void *B)
 {
-	return create_expression(A, B, EXPR_MINUS);
+	return create_expression(sb, A, B, EXPR_MINUS);
 }
 
-void *add_mult(void *A, void *B)
+void *add_mult(struct sqlhist_bison *sb, void *A, void *B)
 {
-	return create_expression(A, B, EXPR_MULT);
+	return create_expression(sb, A, B, EXPR_MULT);
 }
 
-void *add_divid(void *A, void *B)
+void *add_divid(struct sqlhist_bison *sb, void *A, void *B)
 {
-	return create_expression(A, B, EXPR_DIVID);
+	return create_expression(sb, A, B, EXPR_DIVID);
 }
 
 int add_expr(const char *label, void *A)
 {
 	struct expression *e = A;
+	struct sqlhist_bison *sb;
 
 	if (!e)
 		return 0;
 
-	insert_label(label, A, LABEL_EXPR);
-	e->name = store_str(label);
+	sb = e->sb;
+	insert_label(sb, label, A, LABEL_EXPR);
+	e->name = store_str(sb, label);
 	return e->name ? 0 : -ENOMEM;
 }
 
-void *add_field(const char *field, const char *label)
+void *add_field(struct sqlhist_bison *sb, const char *field, const char *label)
 {
 	struct expression *e;
 	int len = strlen(field);
 
 	if (len > 7) {
 		if (strcmp(field + (len - 6), ".USECS") == 0) {
-			field = store_printf("%.*s.common_timestamp.usecs",
+			field = store_printf(sb, "%.*s.common_timestamp.usecs",
 					     len - 6, field);
 		} else if (strcmp(field + (len - 6), ".NSECS") == 0) {
-			field = store_printf("%.*s.common_timestamp",
+			field = store_printf(sb, "%.*s.common_timestamp",
 					     len - 6, field);
 		}
 	}
 
-	e = create_expression(store_str(field), NULL, EXPR_FIELD);
+	e = create_expression(sb, store_str(sb, field), NULL, EXPR_FIELD);
 	if (label)
 		add_expr(label, e);
 
 	return e;
 }
 
-void *add_filter(char *a, char *b, const char *op)
+void *add_filter(struct sqlhist_bison *sb, char *a, char *b, const char *op)
 {
 	void *A;
 	void *B;
 
-	A = create_expression(store_str(a), NULL, EXPR_FIELD);
-	B = create_expression(store_str(b), NULL, EXPR_FIELD);
+	A = create_expression(sb, store_str(sb, a), NULL, EXPR_FIELD);
+	B = create_expression(sb, store_str(sb, b), NULL, EXPR_FIELD);
 
 	if (!A || !B)
 		return NULL;
 
-	return create_expression_op(A, B, op, EXPR_FILTER);
+	return create_expression_op(sb, A, B, op, EXPR_FILTER);
 }
 
 void add_where(void *A)
@@ -381,7 +391,7 @@ static char **add_hash(const char *str)
 	return &hash->str;
 }
 
-char *store_str(const char *str)
+char *store_str(struct sqlhist_bison *sb, const char *str)
 {
 	char **pstr = add_hash(str);
 
@@ -391,7 +401,7 @@ char *store_str(const char *str)
 	return *pstr;
 }
 
-char * store_printf(const char *fmt, ...)
+char * store_printf(struct sqlhist_bison *sb, const char *fmt, ...)
 {
 	va_list ap;
 	char **pstr;

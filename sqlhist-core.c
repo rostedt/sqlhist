@@ -11,6 +11,7 @@
 #include "sqlhist-local.h"
 
 extern int yylex_init(void* ptr_yy_globals);
+extern int yylex_init_extra(struct sqlhist_bison *sb, void* ptr_yy_globals);
 extern int yylex_destroy (void * yyscanner );
 
 #include <trace-seq.h>
@@ -46,6 +47,7 @@ static int lex_it(void)
 	int ret;
 
 	yylex_init(&sb.scanner);
+	yylex_init_extra(&sb, sb.scanner);
 	do {
 		ret = yylex(sb.scanner);
 	} while (ret > 0);
@@ -95,7 +97,7 @@ static const char *resolve_expr(struct sql_table *table,
 	return resolve(table, show_expr(e));
 }
 
-static const char *expand(const char *str)
+static const char *expand(struct sqlhist_bison *sb, const char *str)
 {
 	char *exp = strdup(str);
 	const char *label;
@@ -105,7 +107,7 @@ static const char *expand(const char *str)
 	if ((p = strstr(exp, "."))) {
 		*p = 0;
 		label = resolve(curr_table, exp);
-		ret = store_printf("%s.%s", label, p+1);
+		ret = store_printf(sb, "%s.%s", label, p+1);
 		*p = '.';
 	} else {
 		ret = resolve(curr_table, str);
@@ -119,6 +121,7 @@ static char *expr_op_connect(void *A, void *B, const char *op,
 {
 	struct expression *eA = A;
 	struct expression *eB = B;
+	struct sqlhist_bison *sb = eA->sb;
 	char *a = NULL, *b = NULL;
 	char *ret, *str;
 	int r;
@@ -142,12 +145,13 @@ static char *expr_op_connect(void *A, void *B, const char *op,
 	free(a);
 	free(b);
 
-	ret = store_str(str);
+	ret = store_str(sb, str);
 	free(str);
 	return ret;
 }
 
-static char *str_op_connect(const char *a, const char *b, const char *op)
+static char *str_op_connect(struct sqlhist_bison *sb,
+			    const char *a, const char *b, const char *op)
 {
 	char *ret, *str;
 	int r;
@@ -156,7 +160,7 @@ static char *str_op_connect(const char *a, const char *b, const char *op)
 	if (r < 0)
 		return NULL;
 
-	ret = store_str(str);
+	ret = store_str(sb, str);
 	free(str);
 	return ret;
 }
@@ -164,6 +168,7 @@ static char *str_op_connect(const char *a, const char *b, const char *op)
 const char *__show_expr(struct expression *e, bool eval)
 {
 	const char *(*show)(void *);
+	struct sqlhist_bison *sb = e->sb;
 	char *ret = NULL;
 
 	if (eval)
@@ -175,7 +180,7 @@ const char *__show_expr(struct expression *e, bool eval)
 	case EXPR_FIELD:
 		ret = e->A;
 		if (eval)
-			return expand(e->A);
+			return expand(sb, e->A);
 		break;
 	case EXPR_PLUS:
 		ret = expr_op_connect(e->A, e->B, "+", show);
@@ -190,7 +195,7 @@ const char *__show_expr(struct expression *e, bool eval)
 		ret = expr_op_connect(e->A, e->B, "/", show);
 		break;
 	case EXPR_FILTER:
-		ret = str_op_connect(e->A, e->B, e->op);
+		ret = str_op_connect(sb, e->A, e->B, e->op);
 		break;
 	}
 	return ret;
@@ -272,11 +277,11 @@ static const char *event_match(const char *event, const char *val, int len)
 	return NULL;
 }
 
-static char * make_dynamic_arg(void)
+static char * make_dynamic_arg(struct sqlhist_bison *sb)
 {
 	static int arg_cnt;
 
-	return store_printf("__arg%d__", arg_cnt++);
+	return store_printf(sb, "__arg%d__", arg_cnt++);
 }
 
 static struct tep_event *find_event(struct tep_handle *tep, const char *name)
@@ -355,6 +360,7 @@ static void print_synthetic_field(struct trace_seq *s,
 				  struct selection *selection)
 {
 	struct expression *e = selection->item;
+	struct sqlhist_bison *sb = e->sb;
 	const char *name;
 	const char *actual;
 	const char *field;
@@ -381,7 +387,7 @@ static void print_synthetic_field(struct trace_seq *s,
 		return;
 	}
 
-	selection->name = make_dynamic_arg();
+	selection->name = make_dynamic_arg(sb);
 	e->name = selection->name;
 
 	field = strstr(actual, ".");
@@ -433,6 +439,7 @@ static void print_key(struct trace_seq *s,
 
 static void print_keys(struct trace_seq *s, struct sql_table *table, const char *event)
 {
+	struct sqlhist_bison *sb = table->sb;
 	struct selection *selection;
 	struct match_map *map;
 	struct expression *e;
@@ -447,7 +454,8 @@ static void print_keys(struct trace_seq *s, struct sql_table *table, const char 
 		for (map = table->matches; map; map = map->next) {
 			if (start++)
 				trace_seq_printf(s, ",");
-			print_key(s, table, f, expand(map->A), expand(map->B));
+			print_key(s, table, f, expand(sb, map->A),
+				  expand(sb, map->B));
 		}
 
 		free(f);
@@ -553,6 +561,7 @@ static int print_from_expr(struct trace_seq *s,
 			    struct expression *e, bool *start,
 			    struct var_list **vars)
 {
+	struct sqlhist_bison *sb = e->sb;
 	const char *actual;
 	const char *field;
 	int len = strlen(event);
@@ -565,7 +574,7 @@ static int print_from_expr(struct trace_seq *s,
 		if (field && !find_var(vars, actual)) {
 			print_val_delim(s, start);
 			if (!e->name)
-				e->name = make_dynamic_arg();
+				e->name = make_dynamic_arg(sb);
 			trace_seq_printf(s, "%s=%s", e->name, field);
 			ret = add_var(vars, e->name, actual);
 			break;
@@ -996,6 +1005,7 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 	buffer_size = strlen(buffer);
 
 	yylex_init(&sb.scanner);
+	yylex_init_extra(&sb, sb.scanner);
 	ret = yyparse(&sb);
 	yylex_destroy(sb.scanner);
 	free(buffer);
@@ -1061,10 +1071,12 @@ struct sqlhist *sqlhist_parse(const char *sql_buffer, const char *trace_dir)
 
 int sqlhist_lex_it(void)
 {
+	struct sqlhist_bison sb;
 	void *scanner;
 	int ret;
 
 	yylex_init(&scanner);
+	yylex_init_extra(&sb, scanner);
 	ret = lex_it();
 	yylex_destroy(scanner);
 	return ret;

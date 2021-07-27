@@ -38,6 +38,7 @@ struct sql_table;
 
 struct expression {
 	struct expression	*next;
+	struct sqlhist_bison	*sb;
 	enum expr_type		type;
 	void			*A;
 	void			*B;
@@ -56,6 +57,7 @@ struct sql_table {
 	char			*name;
 	struct sql_table	*parent;
 	struct sql_table	*child;
+	struct sqlhist_bison	*sb;
 	struct label_map	*labels;
 	struct match_map	*matches;
 	struct table_map	*tables;

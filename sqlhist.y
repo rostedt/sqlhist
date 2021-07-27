@@ -60,29 +60,29 @@ extern void yyerror(struct sqlhist_bison *, char *fmt, ...);
 %%
 
 start:
-   select_statement { table_end(NULL); }
+   select_statement { table_end(sb, NULL); }
  | select_name
  ;
 
 select_name :
    '(' select_statement ')' label
 			{
-				CHECK_RETURN_VAL(table_end($4));
-				CHECK_RETURN_VAL(add_label($4, "SELECT"));
+				CHECK_RETURN_VAL(table_end(sb, $4));
+				CHECK_RETURN_VAL(add_label(sb, $4, "SELECT"));
 			}
  ;
 
-label : AS name { CHECK_RETURN_PTR($$ = store_printf("%s", $2)); }
+label : AS name { CHECK_RETURN_PTR($$ = store_printf(sb, "%s", $2)); }
  | name
  ;
 
-select : SELECT  { table_start(); }
+select : SELECT  { table_start(sb); }
   ;
 
 select_statement :
     select selection_list table_exp
 				{
-					$$ = store_printf("SELECT %s %s", $2, $3);
+					$$ = store_printf(sb, "SELECT %s %s", $2, $3);
 					CHECK_RETURN_PTR($$);
 				}
   ;
@@ -91,38 +91,38 @@ selection_list :
    selection_item
  | selection_list ',' selection_item
    				{
-					$$ = store_printf("%s, %s", $1, $3);
+					$$ = store_printf(sb, "%s, %s", $1, $3);
 					CHECK_RETURN_PTR($$);
 				}
  ;
 
 selection_item : selection_expr
 				{
-					$$ = store_str(show_expr($1));
+					$$ = store_str(sb, show_expr($1));
 					CHECK_RETURN_PTR($$);
-					CHECK_RETURN_VAL(add_selection($1));
+					CHECK_RETURN_VAL(add_selection(sb, $1));
 				}
   ;
 
 selection_expr : 
    selection_expr '+' selection_expr
    				{
-					$$ = add_plus($1, $3);
+					$$ = add_plus(sb, $1, $3);
 					CHECK_RETURN_PTR($$);
 				}
  | selection_expr '-' selection_expr
    				{
-					$$ = add_minus($1, $3);
+					$$ = add_minus(sb, $1, $3);
 					CHECK_RETURN_PTR($$);
 				}
  | selection_expr '*' selection_expr
    				{
-					$$ = add_mult($1, $3);
+					$$ = add_mult(sb, $1, $3);
 					CHECK_RETURN_PTR($$);
 				}
  | selection_expr '/' selection_expr
    				{
-					$$ = add_divid($1, $3);
+					$$ = add_divid(sb, $1, $3);
 					CHECK_RETURN_PTR($$);
 				}
  | item
@@ -136,7 +136,7 @@ selection_expr :
 
 item :
    named_field 
- | field		{ $$ = add_field($1, NULL); CHECK_RETURN_PTR($$); }
+ | field		{ $$ = add_field(sb, $1, NULL); CHECK_RETURN_PTR($$); }
  ;
 
 field :
@@ -145,7 +145,7 @@ field :
  ;
 
 named_field :
-   field label { $$ = add_field($1, $2); CHECK_RETURN_PTR($$); }
+   field label { $$ = add_field(sb, $1, $2); CHECK_RETURN_PTR($$); }
  ;
 
 name :
@@ -153,20 +153,20 @@ name :
  ;
 
 compare :
-   field '<' field	{ $$ = add_filter($1, $3, "<"); CHECK_RETURN_PTR($$); }
- | field '>' field	{ $$ = add_filter($1, $3, ">"); CHECK_RETURN_PTR($$); }
- | field LE field	{ $$ = add_filter($1, $3, "<="); CHECK_RETURN_PTR($$); }
- | field GE field	{ $$ = add_filter($1, $3, ">="); CHECK_RETURN_PTR($$); }
- | field '=' field	{ $$ = add_filter($1, $3, "=="); CHECK_RETURN_PTR($$); }
- | field EQ field	{ $$ = add_filter($1, $3, "=="); CHECK_RETURN_PTR($$); }
- | field NEQ field	{ $$ = add_filter($1, $3, "!="); CHECK_RETURN_PTR($$); }
- | field '&' field	{ $$ = add_filter($1, $3, "&"); CHECK_RETURN_PTR($$); }
- | field '~' field	{ $$ = add_filter($1, $3, "~"); CHECK_RETURN_PTR($$); }
+   field '<' field	{ $$ = add_filter(sb, $1, $3, "<"); CHECK_RETURN_PTR($$); }
+ | field '>' field	{ $$ = add_filter(sb, $1, $3, ">"); CHECK_RETURN_PTR($$); }
+ | field LE field	{ $$ = add_filter(sb, $1, $3, "<="); CHECK_RETURN_PTR($$); }
+ | field GE field	{ $$ = add_filter(sb, $1, $3, ">="); CHECK_RETURN_PTR($$); }
+ | field '=' field	{ $$ = add_filter(sb, $1, $3, "=="); CHECK_RETURN_PTR($$); }
+ | field EQ field	{ $$ = add_filter(sb, $1, $3, "=="); CHECK_RETURN_PTR($$); }
+ | field NEQ field	{ $$ = add_filter(sb, $1, $3, "!="); CHECK_RETURN_PTR($$); }
+ | field '&' field	{ $$ = add_filter(sb, $1, $3, "&"); CHECK_RETURN_PTR($$); }
+ | field '~' field	{ $$ = add_filter(sb, $1, $3, "~"); CHECK_RETURN_PTR($$); }
 ;
 
 where_clause :
    WHERE compare {
-	   $$ = store_printf(" WHERE %s", show_expr($2));
+	   $$ = store_printf(sb, " WHERE %s", show_expr($2));
 	   CHECK_RETURN_PTR($$);
 	   add_where($2);
    }
@@ -184,8 +184,8 @@ table_exp :
 from_clause :
    FROM item
 				{
-					add_from($2);
-					$$ = store_printf("FROM %s", show_expr($2));
+					add_from(sb, $2);
+					$$ = store_printf(sb, "FROM %s", show_expr($2));
 					CHECK_RETURN_PTR($$);
 				}
 /*
@@ -202,8 +202,8 @@ from_clause :
 
 join_clause :
   JOIN item ON match_clause	{
-					add_to($2);
-					$$ = store_printf("TO %s",
+					add_to(sb, $2);
+					$$ = store_printf(sb, "TO %s",
 							  show_expr($2));
 				}
  ;
@@ -214,7 +214,7 @@ opt_join_clause :
 ;
 
 match :
-   item '=' item { add_match(show_expr($1), show_expr($3)); }
+   item '=' item { add_match(sb, show_expr($1), show_expr($3)); }
  ;
 
 match_clause :
