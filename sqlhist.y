@@ -10,7 +10,6 @@
 
 extern int yylex(void);
 extern void yyerror(char *fmt, ...);
-int x;
 
 #define CHECK_RETURN_PTR(x)					\
 	do {							\
