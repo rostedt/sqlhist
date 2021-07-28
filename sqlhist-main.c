@@ -50,11 +50,12 @@ static void usage(char **argv)
 		p--;
 	p++;
 
-	printf("\nusage: %s [-hl][-t tracefs-path][file]\n"
+	printf("\nusage: %s [-hl][-t tracefs-path]([-f file]|sql-select-statement)\n"
 	       " file : holds sql statement (read from stdin if not present)\n"
 	       " -h : show this message\n"
 	       " -l : Only run the lexer (for testing)\n"
 	       " -t : Path to tracefs directory (looks for it via /proc/mounts if not set)\n"
+	       " -f : file to read sql-statement from, instead of command line (use '-' for stdin)\n"
 	       "\n",p);
 	exit(-1);
 }
@@ -66,12 +67,14 @@ int main (int argc, char **argv)
 	char *buffer = NULL;
 	char buf[BUFSIZ];
 	int buffer_size = 0;
+	const char *file = NULL;
 	FILE *fp;
 	size_t r;
 	int c;
+	int i;
 
 	for (;;) {
-		c = getopt(argc, argv, "hlt:");
+		c = getopt(argc, argv, "hlt:f:");
 		if (c == -1)
 			break;
 
@@ -83,11 +86,17 @@ int main (int argc, char **argv)
 		case 't':
 			trace_dir = optarg;
 			break;
+		case 'f':
+			file = optarg;
+			break;
 		}
 	}
-	if (argc - optind > 0) {
 
-		fp = fopen(argv[optind], "r");
+	if (file) {
+		if (!strcmp(file, "-"))
+			fp = stdin;
+		else
+			fp = fopen(file, "r");
 		if (!fp)
 			pdie("Error opening: %s", argv[optind]);
 		while ((r = fread(buf, 1, BUFSIZ, fp)) > 0) {
@@ -98,6 +107,17 @@ int main (int argc, char **argv)
 		fclose(fp);
 		if (buffer_size)
 			buffer[buffer_size] = '\0';
+	} else if (argc == optind) {
+		usage(argv);
+	} else {
+		for (i = optind; i < argc; i++) {
+			r = strlen(argv[i]);
+			buffer = realloc(buffer, buffer_size + r + 2);
+			if (i != optind)
+				buffer[buffer_size++] = ' ';
+			strcpy(buffer + buffer_size, argv[i]);
+			buffer_size += r;
+		}
 	}
 
 	sqlhist = sqlhist_parse(buffer, trace_dir);
