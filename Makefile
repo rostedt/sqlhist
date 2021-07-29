@@ -1,10 +1,14 @@
 
-LD_PATH := -L/usr/local/lib/tracefs/ -L/usr/local/lib/traceevent
+LD_PATH := $(shell sh -c 'pkg-config --cflags --libs libtracefs')
 
 test-build-lib = $(if $(shell sh -c 'echo -e "$(1)" | \
-	$(CC) $(LD_PATH) -o /dev/null -x c - $(2) &> /dev/null && echo y'), $3)
+	$(CC) $(LD_PATH) -o /dev/null -x c - &>/dev/null && echo y'), $2)
 
-LIBTRACEFS_AVAILABLE := $(call test-build-lib, \#include <tracefs/tracefs.h>\\nvoid main() {}, -ltracefs, y)
+#test-build-lib2 = $(if $(shell sh -c 'echo -e "$(1) $(CC) $(LD_PATH) -o /dev/null -x c - && echo y"'), $2)
+
+#LIBTRACEFS_AVAILABLE := $(call test-build-lib, #include <tracefs.h>\\nvoid main() {}, y)
+
+LIBTRACEFS_SQL_AVAILABLE := $(call test-build-lib, #include <tracefs.h>\\nvoid main() { tracefs_sql(NULL, NULL, NULL); }, y)
 
 TARGETS = sqlhist
 
@@ -22,8 +26,12 @@ TRACEEVENT_LIBS = $(shell $(PKG_CONFIG) --libs libtraceevent)
 ifeq ($(TRACEFS_INCLUDES),'')
 TARGETS += report_notracefs
 else
-TRACEFS_INCLUDES += -DHAVE_TRACEFS
-TARGETS += report_tracefs
+ ifeq ($(strip $(LIBTRACEFS_SQL_AVAILABLE)),y)
+    SQL_AVAIL = -DHAVE_TRACEFS_SQL
+    SQL_REPORT = report_tracefs_sql
+ endif
+TRACEFS_INCLUDES += -DHAVE_TRACEFS $(SQL_AVAIL)
+TARGETS += report_tracefs $(SQL_REPORT)
 endif
 
 LIBS = $(TRACEFS_LIBS) $(TRACEEVENT_LIBS) -ldl
@@ -54,3 +62,6 @@ report_tracefs: force
 	@echo "tracefs found"
 report_notracefs: force
 	@echo "No tracefs library found"
+
+report_tracefs_sql: force
+	@echo " and has sql support"

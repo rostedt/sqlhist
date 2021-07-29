@@ -4,6 +4,7 @@
 #include <string.h>
 #include <errno.h>
 #include <unistd.h>
+#include <tracefs.h>
 
 #include "sqlhist.h"
 
@@ -60,9 +61,75 @@ static void usage(char **argv)
 	exit(-1);
 }
 
-int main (int argc, char **argv)
+static int do_parse(const char *buffer, const char *trace_dir)
 {
 	struct sqlhist *sqlhist;
+
+	sqlhist = sqlhist_parse(buffer, trace_dir);
+	if (!sqlhist)
+		pdie("Error parsing sqlhist\n");
+
+	if (!sqlhist_start_event(sqlhist))
+		die("Error:\n%s", sqlhist_error(sqlhist));
+
+	if (sqlhist_end_event(sqlhist)) {
+		printf("echo '%s' > synthetic_events\n",
+		       sqlhist_synth_event_def(sqlhist));
+	}
+
+	printf("echo '%s' > %s\n",
+	       sqlhist_start_hist(sqlhist), sqlhist_start_path(sqlhist));
+
+	if (sqlhist_end_event(sqlhist)) {
+		printf("echo '%s' > %s\n",
+		       sqlhist_end_hist(sqlhist), sqlhist_end_path(sqlhist));
+	}
+
+	sqlhist_destroy(sqlhist);
+	return 0;
+}
+
+#ifdef HAVE_TRACEFS_SQL
+static int do_sql(const char *buffer, const char *trace_dir)
+{
+	struct tracefs_synth *synth;
+	struct tep_handle *tep;
+	const char *name = "Anonymous";
+	struct trace_seq seq;
+
+	/* Shut up the compiler */
+	if (0)
+		do_parse(buffer, trace_dir);
+
+	trace_seq_init(&seq);
+	tep = tracefs_local_events(trace_dir);
+	if (!tep) {
+		if (!trace_dir)
+			trace_dir = "tracefs directory";
+		/* Return an empty sqlhist */
+		pdie("Failed to read %s", trace_dir);
+	}
+
+	synth = tracefs_sql(tep, name, buffer);
+	if (!synth)
+		pdie("tracefs_sql");
+
+	tracefs_synth_show(&seq, NULL, synth);
+	tracefs_synth_free(synth);
+
+	trace_seq_do_printf(&seq);
+	trace_seq_destroy(&seq);
+	return 0;
+}
+#else
+static int do_sql(const char *buffer, const char *trace_dir)
+{
+	return do_parse(buffer, trace_dir);
+}
+#endif
+
+int main (int argc, char **argv)
+{
 	char *trace_dir = NULL;
 	char *buffer = NULL;
 	char buf[BUFSIZ];
@@ -120,29 +187,8 @@ int main (int argc, char **argv)
 		}
 	}
 
-	sqlhist = sqlhist_parse(buffer, trace_dir);
+	do_sql(buffer, trace_dir);
 	free(buffer);
-
-	if (!sqlhist)
-		pdie("Error parsing sqlhist\n");
-
-	if (!sqlhist_start_event(sqlhist))
-		die("Error:\n%s", sqlhist_error(sqlhist));
-
-	if (sqlhist_end_event(sqlhist)) {
-		printf("echo '%s' > synthetic_events\n",
-		       sqlhist_synth_event_def(sqlhist));
-	}
-
-	printf("echo '%s' > %s\n",
-	       sqlhist_start_hist(sqlhist), sqlhist_start_path(sqlhist));
-
-	if (sqlhist_end_event(sqlhist)) {
-		printf("echo '%s' > %s\n",
-		       sqlhist_end_hist(sqlhist), sqlhist_end_path(sqlhist));
-	}
-
-	sqlhist_destroy(sqlhist);
 
 	return 0;
 }
